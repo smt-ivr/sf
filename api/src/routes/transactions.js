@@ -3,6 +3,7 @@ import { all, first, nowIso, run, setClause } from '../db.js';
 import { badRequest, json, noContent, notFound, readJson } from '../http.js';
 import { addDays, chargeDate, monthRange, shiftMonth } from '../dates.js';
 import { movesBetween } from './moves.js';
+import { cardsWithBills } from './setup.js';
 import { report, trackingStart, trackingStartAt } from '../money.js';
 import { balances, heldFunds, checkCategory, forecast, insertTransaction, pendingRecurring, resolvePayment, summary, syncRecurring, todayFor } from '../money.js';
 import { fields, id, isDate } from '../validate.js';
@@ -183,7 +184,7 @@ export async function lookups({ env }) {
   const [users, accounts, cards, categories] = await Promise.all([
     all(env, `SELECT id, name, is_active FROM sf_users ORDER BY id`),
     all(env, `SELECT * FROM sf_accounts ORDER BY is_active DESC, sort, id`),
-    all(env, `SELECT * FROM sf_cards ORDER BY is_active DESC, sort, id`),
+    cardsWithBills(env),
     all(env, `SELECT * FROM sf_categories ORDER BY kind, is_active DESC, sort, id`),
   ]);
   return json({ today: todayFor(env), users, accounts, cards, categories });

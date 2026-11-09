@@ -211,12 +211,20 @@ export async function forecast(env, to, today = todayFor(env)) {
       recurring_id: o.recurring_id, account_id: o.account_id, name: o.name, amount: o.kind === 'income' ? o.amount : -o.amount,
     });
   }
-  events.push(...bills.values());
-
-  // future-dated transfers / corrections / held money
+  // future-dated transfers / corrections / held money; a card's built-up bill joins that card's bill
   for (const m of await all(env, `SELECT * FROM sf_account_moves WHERE account_id IS NOT NULL AND date > ? AND date <= ?`, today, to)) {
+    const card = m.kind === 'card_bill' && m.card_id ? cards.get(m.card_id) : null;
+    if (card) {
+      const key = `${card.id}|${m.date}`;
+      const b = bills.get(key) || { type: 'card_bill', date: m.date, card_id: card.id, account_id: m.account_id, name: `חיוב ${card.name}`, amount: 0, count: 0 };
+      b.amount += m.amount;
+      b.count++;
+      bills.set(key, b);
+      continue;
+    }
     events.push({ type: 'move', id: m.id, date: m.date, account_id: m.account_id, name: m.note || 'העברה', amount: m.amount });
   }
+  events.push(...bills.values());
 
   events.sort((a, b) => a.date.localeCompare(b.date) || b.amount - a.amount);
   let running = start;

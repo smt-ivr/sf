@@ -5,6 +5,7 @@ import { badRequest, conflict, invalid, json, noContent, notFound, readJson } fr
 import { checkCategory, resolvePayment, todayFor } from '../money.js';
 import { getSettings, setSetting } from '../settings.js';
 import { fields, id } from '../validate.js';
+import { dayIn, shiftMonth } from '../dates.js';
 
 async function checkOwner(env, owner_id) {
   if (owner_id && !(await first(env, `SELECT id FROM sf_users WHERE id = ?`, owner_id))) throw invalid({ owner_id: 'משתמש לא קיים' });
@@ -104,7 +105,51 @@ async function checkCard(env, d, current = {}) {
 }
 
 export async function listCards({ env }) {
-  return json(await all(env, `SELECT * FROM sf_cards ORDER BY is_active DESC, sort, id`));
+  return json(await cardsWithBills(env));
+}
+
+/** Cards, each regular one with its built-up bill still to come (bill_amount, bill_date). */
+export async function cardsWithBills(env) {
+  const cards = await all(env, `SELECT * FROM sf_cards ORDER BY is_active DESC, sort, id`);
+  const bills = await all(env, `SELECT card_id, date, -amount AS amount FROM sf_account_moves WHERE kind = 'card_bill' AND date >= ?`, todayFor(env));
+  for (const c of cards) {
+    const b = bills.find((x) => x.card_id === c.id);
+    c.bill_amount = b ? b.amount : null;
+    c.bill_date = b ? b.date : null;
+  }
+  return cards;
+}
+
+/** The next billing day of a regular card (today counts as already charged). */
+export function nextBillingDate(today, billingDay) {
+  const [y, m, d] = today.split('-').map(Number);
+  const [ny, nm] = d < billingDay ? [y, m] : shiftMonth(y, m, 1);
+  return dayIn(ny, nm, billingDay);
+}
+
+/**
+ * PUT /cards/:id/bill { amount, date? }: the bill already built up on a regular card (from the card's
+ * app). It comes off the card's account on the billing day; empty removes it. Not an expense in the
+ * reports: those purchases were made before tracking started.
+ */
+export async function putCardBill({ env, request, params, actor }) {
+  const cid = id(params.id);
+  const card = await first(env, `SELECT * FROM sf_cards WHERE id = ?`, cid);
+  if (!card) throw notFound('כרטיס לא נמצא');
+  if (card.kind !== 'regular') throw badRequest('רק בכרטיס רגיל יש חיוב שמצטבר');
+  const today = todayFor(env);
+  const d = fields(await readJson(request)).money('amount', { nullable: true }).date('date').done();
+  const date = d.date || nextBillingDate(today, card.billing_day);
+  if (date < today) throw invalid({ date: 'התאריך עבר' });
+  await run(env, `DELETE FROM sf_account_moves WHERE kind = 'card_bill' AND card_id = ? AND date >= ?`, cid, today);
+  if (d.amount != null) { // 0 = "nothing to pay this time" (still recorded, so we stop asking)
+    await run(
+      env,
+      `INSERT INTO sf_account_moves (kind, account_id, card_id, date, amount, note, user_id) VALUES ('card_bill', ?, ?, ?, ?, ?, ?)`,
+      card.account_id, cid, date, -d.amount, `חיוב ${card.name} (רכישות שכבר נעשו)`, actor.id
+    );
+  }
+  return json((await cardsWithBills(env)).find((c) => c.id === cid));
 }
 
 export async function createCard({ env, request }) {
