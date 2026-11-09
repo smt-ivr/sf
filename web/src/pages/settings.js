@@ -1,7 +1,7 @@
 // Settings: bank accounts, credit cards, categories, users (phones, e-mail), the phone line, password.
 import { useState } from 'preact/hooks';
 import { api } from '../api.js';
-import { confirmBox, ErrorBox, Field, html, Loading, Modal, money, num, Segments, shortDate, toast, toInput, useApi, useForm, userName } from '../ui.js';
+import { confirmBox, ErrorBox, Field, html, Loading, Modal, money, num, Segments, toast, toInput, useApi, useForm, userName } from '../ui.js';
 
 export function Settings(props) {
   const { lookups, refresh, logout, me } = props;
@@ -24,8 +24,7 @@ export function Settings(props) {
     <section class="card">
       <div class="month-head"><h3>כרטיסי אשראי</h3><button class="btn small" disabled=${!lookups.accounts.length} onClick=${() => setOpen({ type: 'card', item: {} })}>+ כרטיס</button></div>
       ${lookups.cards.map((c) => html`<button class=${`list-row tx ${c.is_active ? '' : 'inactive'}`} onClick=${() => setOpen({ type: 'card', item: c })}>
-        <span><b>💳 ${c.name}${c.last4 ? ` · ${c.last4}` : ''}</b><span class="muted small">${[c.kind === 'direct' ? 'דיירקט (יורד מיד)' : `רגיל · חיוב ב-${c.billing_day} לחודש`, `מחשבון ${accName(c.account_id)}`, userName(c.owner_id, lookups), !c.is_active && 'לא פעיל'].filter(Boolean).join(' · ')}</span>
-          ${c.kind === 'regular' && c.is_active && html`<span class=${`small ${c.bill_amount == null ? 'expense' : ''}`}>${c.bill_amount == null ? '⚠ לא הוזן כמה יורד בחיוב הקרוב' : `חיוב קרוב: ${money(c.bill_amount)} ב-${shortDate(c.bill_date)}`}</span>`}</span><span class="muted">›</span>
+        <span><b>💳 ${c.name}${c.last4 ? ` · ${c.last4}` : ''}</b><span class="muted small">${[c.kind === 'direct' ? 'דיירקט (יורד מיד)' : `רגיל · חיוב ב-${c.billing_day} לחודש`, `מחשבון ${accName(c.account_id)}`, userName(c.owner_id, lookups), !c.is_active && 'לא פעיל'].filter(Boolean).join(' · ')}</span></span><span class="muted">›</span>
       </button>`)}
     </section>
 
@@ -89,22 +88,13 @@ function AccountForm({ item, lookups, onClose, onSaved }) {
 }
 
 function CardForm({ item, lookups, onClose, onSaved }) {
-  const f = useForm({ bill: toInput(item.bill_amount), name: item.name || '', last4: item.last4 || '', kind: item.kind || 'regular', account_id: item.account_id ?? lookups.accounts.find((a) => a.is_active)?.id ?? '', billing_day: item.billing_day ?? 10, owner_id: item.owner_id ?? '', is_active: item.is_active ?? 1 });
-  const { remove } = crud('/cards', item, onSaved);
+  const f = useForm({ name: item.name || '', last4: item.last4 || '', kind: item.kind || 'regular', account_id: item.account_id ?? lookups.accounts.find((a) => a.is_active)?.id ?? '', billing_day: item.billing_day ?? 10, owner_id: item.owner_id ?? '', is_active: item.is_active ?? 1 });
+  const { save, remove } = crud('/cards', item, onSaved);
   const v = f.values;
-  const submit = (e) => {
-    e.preventDefault();
-    const { bill, ...rest } = v;
-    f.submit(async () => {
-      const body = { ...rest, account_id: num(v.account_id), billing_day: v.kind === 'regular' ? num(v.billing_day) : null, owner_id: num(v.owner_id), is_active: Boolean(Number(v.is_active)) };
-      const card = item.id ? await api.patch(`/cards/${item.id}`, body) : await api.post('/cards', body);
-      if (card.kind === 'regular' && bill !== toInput(item.bill_amount)) await api.put(`/cards/${card.id}/bill`, { amount: bill || null });
-      return card;
-    }).then((r) => r && (toast('נשמר'), onSaved()));
-  };
+  const submit = (e) => { e.preventDefault(); save(f, { ...v, account_id: num(v.account_id), billing_day: v.kind === 'regular' ? num(v.billing_day) : null, owner_id: num(v.owner_id), is_active: Boolean(Number(v.is_active)) }); };
   return html`<${Modal} title=${item.id ? 'כרטיס אשראי' : 'כרטיס אשראי חדש'} onClose=${onClose}><form onSubmit=${submit}>
     <${Segments} value=${v.kind} onChange=${f.set('kind')} options=${[{ value: 'regular', label: 'רגיל' }, { value: 'direct', label: 'דיירקט' }]} />
-    <p class="hint">${v.kind === 'regular' ? 'כל מה שנקנה בחודש יורד מהחשבון ביום החיוב של החודש הבא.' : 'כל רכישה יורדת מהחשבון מיד (כרטיס חיוב מיידי).'}</p>
+    <p class="hint">${v.kind === 'regular' ? 'כל חיוב בכרטיס יורד מהחשבון ביום החיוב הקרוב. למשל: יום חיוב 15, ביטוח שיורד מהכרטיס ב-15 יורד מהחשבון באותו יום, וקנייה ב-20 יורדת ב-15 בחודש הבא.' : 'כל רכישה יורדת מהחשבון מיד (כרטיס חיוב מיידי).'}</p>
     <div class="row2">
       <${Field} label="שם" error=${f.errors.name}><input value=${v.name} onInput=${f.set('name')} placeholder="ויזה כאל" required /><//>
       <${Field} label="4 ספרות אחרונות" error=${f.errors.last4}><input value=${v.last4} onInput=${f.set('last4')} inputmode="numeric" maxlength="4" dir="ltr" /><//>
@@ -113,9 +103,6 @@ function CardForm({ item, lookups, onClose, onSaved }) {
       <${Field} label="יורד מחשבון" error=${f.errors.account_id}><select value=${v.account_id} onChange=${f.set('account_id')}>${lookups.accounts.map((a) => html`<option value=${a.id}>${a.name}</option>`)}</select><//>
       ${v.kind === 'regular' && html`<${Field} label="יום חיוב" error=${f.errors.billing_day}><select value=${v.billing_day} onChange=${f.set('billing_day')}>${[2, 10, 15].concat(Array.from({ length: 31 }, (_, i) => i + 1).filter((d) => ![2, 10, 15].includes(d))).map((d) => html`<option value=${d}>${d}</option>`)}</select><//>`}
     </div>
-    ${v.kind === 'regular' && html`<${Field} label="כמה יורד בחיוב הקרוב (₪)" hint=${`מה שכבר הצטבר בכרטיס, לפי האפליקציה של הכרטיס. יורד מהחשבון ביום החיוב${item.bill_date ? ` (${shortDate(item.bill_date)})` : ''}. ריק = אין`}>
-      <input inputmode="decimal" value=${v.bill} onInput=${f.set('bill')} />
-    <//>`}
     <${Field} label="של מי"><${OwnerSelect} value=${v.owner_id} onChange=${f.set('owner_id')} lookups=${lookups} /><//>
     ${item.id && html`<${Field} label="מצב"><${ActiveSelect} value=${v.is_active} onChange=${f.set('is_active')} /><//>`}
     <${Buttons} f=${f} item=${item} remove=${remove} />

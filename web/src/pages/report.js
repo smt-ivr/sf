@@ -39,14 +39,13 @@ export function Report({ version, lookups, openEntry }) {
   return html`
     ${head}
     <section class="card">
-      <p class="muted small">${period === 'start' ? 'מאז תחילת המעקב: ' : ''}${shortDate(data.from)} (${hebDate(data.from)}) עד ${shortDate(data.to)} · ${data.days} ימים</p>
+      <p class="muted small">${period === 'start' ? 'מאז העסקה הראשונה: ' : ''}${shortDate(data.from)} (${hebDate(data.from)}) עד ${shortDate(data.to)} · ${data.days} ימים</p>
       <div class="kpis">
         <div><span class="muted small">נכנס</span><b class="income">${money(data.income)}</b></div>
         <div><span class="muted small">יצא</span><b class="expense">${money(data.expense)}</b></div>
         <div><span class="muted small">${data.net < 0 ? 'חסר' : 'נשאר'}</span><b class=${data.net < 0 ? 'expense' : 'income'}>${money(data.net)}</b></div>
       </div>
       <p class="muted small">בממוצע ${money(data.per_day)} הוצאות ליום · ${data.count} תנועות</p>
-      ${period === 'start' && html`<p class="hint">מהיום שהזנת את היתרות הראשונות.</p>`}
     </section>
 
     ${data.unrecorded !== 0 && html`<section class="card attention">

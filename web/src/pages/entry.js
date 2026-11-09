@@ -3,13 +3,14 @@ import { useState } from 'preact/hooks';
 import { api } from '../api.js';
 import { confirmBox, Field, html, Modal, num, Segments, shortDate, toast, toInput, useForm } from '../ui.js';
 
-/** Same rule as the server: a regular card is charged on its billing day of the next month. */
+/** Same rule as the server: a regular card is charged on its next billing day (on or after the date). */
 function previewCharge(date, card) {
   if (!date || !card || card.kind !== 'regular' || !card.billing_day) return date;
   let [y, m] = date.split('-').map(Number);
+  const at = (yy, mm) => `${yy}-${String(mm).padStart(2, '0')}-${String(Math.min(card.billing_day, new Date(yy, mm, 0).getDate())).padStart(2, '0')}`;
+  if (at(y, m) >= date) return at(y, m);
   m += 1; if (m > 12) { m = 1; y += 1; }
-  const last = new Date(y, m, 0).getDate();
-  return `${y}-${String(m).padStart(2, '0')}-${String(Math.min(card.billing_day, last)).padStart(2, '0')}`;
+  return at(y, m);
 }
 
 export function EntryForm({ tx, lookups, me, onClose, onSaved }) {

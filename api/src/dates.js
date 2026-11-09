@@ -90,12 +90,16 @@ export function occurrences(r, from, to) {
 
 /**
  * When the money leaves (or reaches) the bank account.
- *   card regular: billing_day of the month after the purchase month
+ *   card regular: the card's next billing day, on or after the date (insurance charged to the card on
+ *                 the 15th, billing day 15 -> leaves the account that same 15th; a purchase on the 20th
+ *                 -> the 15th of next month)
  *   card direct / bank account / cash: the same day
  */
 export function chargeDate(date, card) {
   if (!card || card.kind !== 'regular' || !card.billing_day) return date;
   const [y, m] = parts(date);
+  const thisMonth = dayIn(y, m, card.billing_day);
+  if (thisMonth >= date) return thisMonth;
   const [ny, nm] = shiftMonth(y, m, 1);
   return dayIn(ny, nm, card.billing_day);
 }

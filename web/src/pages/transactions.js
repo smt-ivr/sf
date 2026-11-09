@@ -3,7 +3,7 @@ import { useState } from 'preact/hooks';
 import { api } from '../api.js';
 import { confirmBox, ErrorBox, html, Loading, longDate, money, monthName, paymentName, shiftMonth, toast, useApi, userName } from '../ui.js';
 
-const MOVE_ICON = { adjust: '⚖', transfer: '⇄', held: '🤝', card_bill: '💳' };
+const MOVE_ICON = { adjust: '⚖', transfer: '⇄', held: '🤝' };
 
 export function Transactions({ version, lookups, openEntry, refresh }) {
   const [month, setMonth] = useState(lookups.today.slice(0, 7));

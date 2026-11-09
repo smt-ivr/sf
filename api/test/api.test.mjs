@@ -25,9 +25,11 @@ function makeApp() {
 const ivr = (app, params) =>
   worker.fetch(new Request(`https://smti.uk/sf/api/ivr?${new URLSearchParams(params)}`), app.env).then((r) => r.text());
 
-test('dates: regular card is charged on its day next month; clamps to month end', () => {
+test('dates: regular card is charged on its next billing day (same day counts); clamps to month end', () => {
   assert.equal(chargeDate('2026-01-20', { kind: 'regular', billing_day: 10 }), '2026-02-10');
-  assert.equal(chargeDate('2026-01-05', { kind: 'regular', billing_day: 31 }), '2026-02-28');
+  assert.equal(chargeDate('2026-11-15', { kind: 'regular', billing_day: 15 }), '2026-11-15'); // insurance on the 15th
+  assert.equal(chargeDate('2026-11-09', { kind: 'regular', billing_day: 15 }), '2026-11-15');
+  assert.equal(chargeDate('2026-02-05', { kind: 'regular', billing_day: 31 }), '2026-02-28');
   assert.equal(chargeDate('2026-12-31', { kind: 'regular', billing_day: 2 }), '2027-01-02');
   assert.equal(chargeDate('2026-01-20', { kind: 'direct' }), '2026-01-20');
   assert.equal(chargeDate('2026-01-20', null), '2026-01-20');
@@ -235,7 +237,7 @@ test('recurring by the Hebrew calendar is validated', async () => {
   assert.ok(fc.events.some((e) => e.recurring_id === ok.data.id));
 });
 
-test('report: from the first balance entered, by category and payment, with unrecorded differences', async () => {
+test('report: from the first entry, by category and payment, with unrecorded differences', async () => {
   const { app, acc, regular, food } = await ready();
   const today = todayFor(app.env);
   await app.call('PATCH', `/accounts/${acc.id}`, { opening_date: today, opening_balance: 1000 });
@@ -245,10 +247,10 @@ test('report: from the first balance entered, by category and payment, with unre
   // the wallet's opening date is today too, so tracking starts today
   await app.call('POST', `/accounts/${acc.id}/balance`, { balance: 351 }); // 1000 + 500 - 999 = 501 computed (card not charged yet) -> 150 unrecorded
   const r = (await app.call('GET', '/report')).data;
-  assert.equal(r.tracking_start, today);
-  assert.equal(r.from, today);
+  assert.equal(r.tracking_start, '2020-01-05'); // the earliest entry
+  assert.equal(r.from, '2020-01-05');
   assert.equal(r.income, 50000);
-  assert.equal(r.expense, 109900); // the 999 dated 2020 was recorded after the start: it counts
+  assert.equal(r.expense, 109900);
   assert.equal((await app.call('GET', `/report?from=${today}&to=${today}`)).data.expense, 10000); // a date range: by date only
   assert.equal(r.categories.find((c) => c.category_id === food.id).amount, 10000);
   assert.equal(r.payments.find((p) => p.card_id === regular.id).amount, 10000);
@@ -295,27 +297,4 @@ test('money held for others belongs to an account: what is missing there', async
   // the account has 1000: 500 of his money was used
   const bal = (await app.call('GET', '/dashboard')).data.accounts.find((a) => a.id === acc.id).balance;
   assert.equal(bal - held.by_account[acc.id], -50000);
-});
-
-test('a regular card bill that built up before tracking: comes off the account on the billing day', async () => {
-  const { app, acc, regular, direct } = await ready();
-  const today = todayFor(app.env);
-  await app.call('PATCH', `/accounts/${acc.id}`, { opening_date: today, opening_balance: 1000 });
-  assert.equal((await app.call('PUT', `/cards/${direct.id}/bill`, { amount: 10 })).status, 400);
-  const r = await app.call('PUT', `/cards/${regular.id}/bill`, { amount: 2500 });
-  assert.equal(r.status, 200);
-  assert.equal(r.data.bill_amount, 250000);
-  assert.ok(r.data.bill_date > today && r.data.bill_date.endsWith('-10'));
-  // a purchase today goes to next month's bill; the built-up bill is in the forecast on its date
-  const fc = (await app.call('GET', '/forecast?days=40')).data;
-  const bill = fc.events.find((e) => e.type === 'card_bill' && e.date === r.data.bill_date);
-  assert.equal(bill.amount, -250000);
-  assert.equal(fc.per_account.find((x) => x.account_id === acc.id).need, 150000);
-  // not an expense in the reports
-  assert.equal((await app.call('GET', '/report')).data.expense, 0);
-  // replacing and removing
-  await app.call('PUT', `/cards/${regular.id}/bill`, { amount: 300 });
-  assert.equal((await app.call('GET', '/lookups')).data.cards.find((c) => c.id === regular.id).bill_amount, 30000);
-  await app.call('PUT', `/cards/${regular.id}/bill`, { amount: null });
-  assert.equal((await app.call('GET', '/lookups')).data.cards.find((c) => c.id === regular.id).bill_amount, null);
 });

@@ -27,7 +27,7 @@ export function Home({ version, lookups, openEntry, refresh }) {
   const since = data.since;
   return html`
     <a class="card since" href="#/report">
-      <div class="month-head"><h3>מאז שהתחלנו לרשום</h3><span class="muted small">${shortDate(since.tracking_start)} · ${hebDate(since.tracking_start)}</span></div>
+      <div class="month-head"><h3>מאז העסקה הראשונה</h3><span class="muted small">${shortDate(since.tracking_start)} · ${hebDate(since.tracking_start)}</span></div>
       <div class="kpis">
         <div><span class="muted small">נכנס</span><b class="income">${money(since.income)}</b></div>
         <div><span class="muted small">יצא</span><b class="expense">${money(since.expense)}</b></div>
@@ -36,8 +36,6 @@ export function Home({ version, lookups, openEntry, refresh }) {
       ${since.unrecorded < 0 && html`<p class="small expense">⚠ ${money(-since.unrecorded)} יצאו בלי רישום (לפי עדכוני יתרה)</p>`}
       <span class="link small">לאן הלך כל שקל ›</span>
     </a>
-
-    ${lookups.cards.filter((c) => c.kind === 'regular' && c.is_active && c.bill_amount == null).map((c) => html`<${CardBillPrompt} card=${c} onDone=${refresh} />`)}
 
     <section class="card month">
       <div class="month-head"><h2>${monthName(data.today.slice(0, 7))} <span class="muted small">${hebDate(data.today)}</span></h2><a class="link small" href="#/tx">לכל התנועות</a></div>
@@ -103,20 +101,6 @@ export function Home({ version, lookups, openEntry, refresh }) {
     ${held && html`<${HeldModal} lookups=${lookups} onClose=${() => setHeld(false)} onDone=${refresh} />`}
     ${confirming && html`<${ConfirmRecurring} item=${confirming} onClose=${() => setConfirming(null)} onDone=${() => { setConfirming(null); refresh(); }} />`}
   `;
-}
-
-/** A regular card without its built-up bill: ask how much comes off on the billing day. */
-function CardBillPrompt({ card, onDone }) {
-  const [amount, setAmount] = useState('');
-  const save = (e) => {
-    e.preventDefault();
-    api.put(`/cards/${card.id}/bill`, { amount: amount || 0 }).then(() => (toast('נשמר'), onDone()), (er) => toast(er.message, 'bad'));
-  };
-  return html`<form class="card attention" onSubmit=${save}>
-    <b>💳 כמה יורד בחיוב הקרוב של ${card.name}?</b>
-    <p class="small">ב-${card.billing_day} לחודש יורד מהחשבון כל מה שכבר הצטבר בכרטיס (גם מלפני שהתחלת לרשום). תסתכל באפליקציה של הכרטיס ותכתוב את הסכום, כדי שהמערכת תדע שהוא יוצא.</p>
-    <div class="row2"><input inputmode="decimal" placeholder="₪" value=${amount} onInput=${(e) => setAmount(e.target.value)} required /><button class="btn primary">שמירה</button></div>
-  </form>`;
 }
 
 function ConfirmRecurring({ item, onClose, onDone }) {

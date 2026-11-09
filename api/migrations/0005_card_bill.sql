@@ -1,6 +1,6 @@
--- A regular card's bill that had already built up before tracking started (purchases we never recorded):
--- the user types it in from the card's app, and it hits the account on the billing day.
--- SQLite cannot change a CHECK constraint, so sf_account_moves is rebuilt with kind 'card_bill' and card_id.
+-- Rebuilds sf_account_moves with kind 'card_bill' and card_id (for a card's built-up bill).
+-- That feature was dropped, but this migration is already applied, so it stays: the extra kind and
+-- column are simply unused.
 CREATE TABLE sf_account_moves_new (
   id          INTEGER PRIMARY KEY,
   kind        TEXT NOT NULL CHECK (kind IN ('adjust', 'transfer', 'held', 'card_bill')),

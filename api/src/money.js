@@ -185,6 +185,7 @@ export async function forecast(env, to, today = todayFor(env)) {
       const b = bills.get(key) || { type: 'card_bill', date: t.charge_date, card_id: card.id, account_id: t.account_id, name: `חיוב ${card.name}`, amount: 0, count: 0 };
       b.amount += signed(t);
       b.count++;
+      (b.items ||= []).push(t.note || t.category_name || 'רכישה');
       bills.set(key, b);
     } else {
       events.push({ type: 'entry', id: t.id, date: t.charge_date, account_id: t.account_id, name: t.note || t.category_name || (t.kind === 'income' ? 'הכנסה' : 'הוצאה'), amount: signed(t) });
@@ -202,6 +203,7 @@ export async function forecast(env, to, today = todayFor(env)) {
       const b = bills.get(key) || { type: 'card_bill', date: o.charge_date, card_id: card.id, account_id: o.account_id, name: `חיוב ${card.name}`, amount: 0, count: 0 };
       b.amount += o.kind === 'income' ? o.amount : -o.amount;
       b.count++;
+      (b.items ||= []).push(o.name);
       bills.set(key, b);
       continue;
     }
@@ -211,20 +213,13 @@ export async function forecast(env, to, today = todayFor(env)) {
       recurring_id: o.recurring_id, account_id: o.account_id, name: o.name, amount: o.kind === 'income' ? o.amount : -o.amount,
     });
   }
-  // future-dated transfers / corrections / held money; a card's built-up bill joins that card's bill
+  for (const b of bills.values()) if (b.items?.length) b.name = `${b.name}: ${b.items.slice(0, 3).join(', ')}${b.items.length > 3 ? '…' : ''}`;
+  events.push(...bills.values());
+
+  // future-dated transfers / corrections / held money
   for (const m of await all(env, `SELECT * FROM sf_account_moves WHERE account_id IS NOT NULL AND date > ? AND date <= ?`, today, to)) {
-    const card = m.kind === 'card_bill' && m.card_id ? cards.get(m.card_id) : null;
-    if (card) {
-      const key = `${card.id}|${m.date}`;
-      const b = bills.get(key) || { type: 'card_bill', date: m.date, card_id: card.id, account_id: m.account_id, name: `חיוב ${card.name}`, amount: 0, count: 0 };
-      b.amount += m.amount;
-      b.count++;
-      bills.set(key, b);
-      continue;
-    }
     events.push({ type: 'move', id: m.id, date: m.date, account_id: m.account_id, name: m.note || 'העברה', amount: m.amount });
   }
-  events.push(...bills.values());
 
   events.sort((a, b) => a.date.localeCompare(b.date) || b.amount - a.amount);
   let running = start;
@@ -258,18 +253,13 @@ export async function forecast(env, to, today = todayFor(env)) {
 }
 
 // ------------------------------------------------------------------ monthly summary
-/**
- * Income/expenses dated from..to. With `recordedSince` (an ISO time), entries recorded since then count
- * too even when dated earlier: "since we started recording" includes an expense from three days before
- * the start that was recorded after it.
- */
-export async function summary(env, from, to, recordedSince = null) {
+/** Income/expenses dated from..to (by the date of each entry). */
+export async function summary(env, from, to) {
   const rows = await all(
     env,
     `SELECT t.kind, t.amount, t.date, t.category_id, t.owner_id, t.card_id, t.account_id, c.name AS category_name
-     FROM sf_transactions t LEFT JOIN sf_categories c ON c.id = t.category_id
-     WHERE (t.date BETWEEN ?1 AND ?2) OR (?3 IS NOT NULL AND t.date < ?1 AND t.created_at >= ?3)`,
-    from, to, recordedSince
+     FROM sf_transactions t LEFT JOIN sf_categories c ON c.id = t.category_id WHERE t.date BETWEEN ? AND ?`,
+    from, to
   );
   const total = { income: 0, expense: 0 };
   const byCat = new Map();
@@ -305,24 +295,18 @@ export async function summary(env, from, to, recordedSince = null) {
   };
 }
 
-/** Tracking started on the day the first balance was entered (the earliest opening date). */
+/** The count starts at the first entry: the date of the earliest income/expense. */
 export async function trackingStart(env) {
-  const r = await first(env, `SELECT MIN(opening_date) AS d FROM sf_accounts`);
+  const r = await first(env, `SELECT MIN(date) AS d FROM sf_transactions`);
   return r?.d || todayFor(env);
-}
-
-/** When the first balance was entered (entries recorded from then on are "since we started"). */
-export async function trackingStartAt(env) {
-  const r = await first(env, `SELECT MIN(COALESCE(opening_at, opening_date || 'T00:00:00Z')) AS t FROM sf_accounts`);
-  return r?.t || null;
 }
 
 /**
  * Where the money went between from..to: income/expenses by category, payment and person, per day,
  * plus balance corrections ("I have X now") = money that moved without being recorded.
  */
-export async function report(env, from, to, recordedSince = null) {
-  const sum = await summary(env, from, to, recordedSince);
+export async function report(env, from, to) {
+  const sum = await summary(env, from, to);
   const adjust = await all(
     env,
     `SELECT m.account_id, a.name AS account_name, a.kind AS account_kind, SUM(m.amount) AS amount, COUNT(*) AS count
