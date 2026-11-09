@@ -27,6 +27,7 @@ const accountFields = (body, partial) =>
     .str('bank', { max: 60 })
     .str('branch', { max: 20 })
     .str('number', { max: 30 })
+    .oneOf('kind', ['bank', 'cash'], { default: 'bank' })
     .int('owner_id', { nullable: true, min: 1 })
     .date('opening_date')
     .bool('is_active')
@@ -52,8 +53,8 @@ export async function createAccount({ env, request }) {
   await checkOwner(env, d.owner_id);
   const res = await run(
     env,
-    `INSERT INTO sf_accounts (name, bank, branch, number, owner_id, opening_balance, opening_date, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    d.name, d.bank, d.branch, d.number, d.owner_id ?? null, openingBalance(body) ?? 0, d.opening_date || todayFor(env), d.sort ?? 0
+    `INSERT INTO sf_accounts (name, kind, bank, branch, number, owner_id, opening_balance, opening_date, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    d.name, d.kind, d.bank, d.branch, d.number, d.owner_id ?? null, openingBalance(body) ?? 0, d.opening_date || todayFor(env), d.sort ?? 0
   );
   return json(await first(env, `SELECT * FROM sf_accounts WHERE id = ?`, res.meta.last_row_id), 201);
 }
@@ -64,7 +65,7 @@ export async function patchAccount({ env, request, params }) {
   const d = accountFields(body, true);
   await checkOwner(env, d.owner_id);
   d.opening_balance = openingBalance(body);
-  const set = setClause(d, ['name', 'bank', 'branch', 'number', 'owner_id', 'opening_balance', 'opening_date', 'is_active', 'sort']);
+  const set = setClause(d, ['name', 'kind', 'bank', 'branch', 'number', 'owner_id', 'opening_balance', 'opening_date', 'is_active', 'sort']);
   if (set.keys.length) await run(env, `UPDATE sf_accounts SET ${set.sql} WHERE id = ?`, ...set.params, aid);
   const row = await first(env, `SELECT * FROM sf_accounts WHERE id = ?`, aid);
   if (!row) throw notFound('חשבון לא נמצא');
@@ -75,6 +76,7 @@ export const deleteAccount = ({ env, params }) =>
   removeOrRefuse(env, 'sf_accounts', id(params.id), [
     [`SELECT 1 FROM sf_cards WHERE account_id = ?`, 'כרטיסים'],
     [`SELECT 1 FROM sf_transactions WHERE account_id = ?`, 'תנועות'],
+    [`SELECT 1 FROM sf_account_moves WHERE account_id = ?`, 'העברות או עדכוני יתרה'],
   ]);
 
 // ------------------------------------------------------------------ cards
@@ -181,6 +183,7 @@ const recurringFields = (body, partial) =>
     .int('card_id', { nullable: true, min: 1 })
     .int('owner_id', { nullable: true, min: 1 })
     .int('day_of_month', { required: true, min: 1, max: 31 })
+    .oneOf('calendar', ['gregorian', 'hebrew'])
     .int('interval_months', { min: 1, max: 12 })
     .date('start_date')
     .date('end_date', { nullable: true })
@@ -189,11 +192,15 @@ const recurringFields = (body, partial) =>
     .str('note', { max: 300 })
     .done();
 
-const RECURRING_COLUMNS = ['kind', 'name', 'amount', 'category_id', 'account_id', 'card_id', 'owner_id', 'day_of_month', 'interval_months', 'start_date', 'end_date', 'auto', 'is_active', 'note'];
+const RECURRING_COLUMNS = ['kind', 'name', 'amount', 'category_id', 'account_id', 'card_id', 'owner_id', 'day_of_month', 'calendar', 'interval_months', 'start_date', 'end_date', 'auto', 'is_active', 'note'];
 
 async function checkRecurring(env, d, current = {}) {
   const m = { ...current, ...d };
   if (m.end_date && m.start_date && m.end_date < m.start_date) throw invalid({ end_date: 'תאריך הסיום לפני ההתחלה' });
+  if (m.calendar === 'hebrew') {
+    if (m.day_of_month > 30) throw invalid({ day_of_month: 'בחודש עברי יש עד ל׳ ימים' });
+    if (m.interval_months !== 1) throw invalid({ interval_months: 'לפי תאריך עברי: כל חודש' });
+  }
   if (d.card_id !== undefined || d.account_id !== undefined) await resolvePayment(env, m);
   await checkCategory(env, m.category_id, m.kind);
   await checkOwner(env, d.owner_id);
@@ -207,6 +214,7 @@ export async function createRecurring({ env, request }) {
   const d = recurringFields(await readJson(request), false);
   d.start_date ||= todayFor(env);
   d.interval_months ??= 1;
+  d.calendar ??= 'gregorian';
   d.auto ??= true;
   if (d.card_id) d.account_id = null;
   await checkRecurring(env, d);

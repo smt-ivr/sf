@@ -177,3 +177,6 @@ input:focus, select:focus { outline: 2px solid var(--brand); outline-offset: -1p
 .toast { background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; transition: opacity .3s; }
 .toast.bad { background: var(--expense); color: #fff; }
 .toast.hide { opacity: 0; }
+.held { box-shadow: none; margin-bottom: 10px; }
+.held-row { color: var(--muted); }
+.list-row.move b:first-child { font-weight: 500; }

@@ -9,6 +9,12 @@ const signed = (t) => (t.kind === 'income' ? t.amount : -t.amount);
 const LOOKBACK_DAYS = 120;
 
 // ------------------------------------------------------------------ payment method
+/** The cash wallet (an account of kind 'cash'); "cash" payments go there. null when there is none. */
+export async function cashAccountId(env) {
+  const row = await first(env, `SELECT id FROM sf_accounts WHERE kind = 'cash' ORDER BY is_active DESC, sort, id LIMIT 1`);
+  return row?.id ?? null;
+}
+
 /**
  * Resolves where money comes from / goes to: a card (then its bank account), a bank account, or cash.
  * Returns { card, account_id, card_id }. Throws 422 on unknown ids.
@@ -24,7 +30,7 @@ export async function resolvePayment(env, { card_id, account_id }) {
     if (!acc) throw invalid({ account_id: 'חשבון לא קיים' });
     return { card: null, card_id: null, account_id };
   }
-  return { card: null, card_id: null, account_id: null }; // cash
+  return { card: null, card_id: null, account_id: await cashAccountId(env) }; // cash: into the wallet
 }
 
 export async function checkCategory(env, category_id, kind) {
@@ -62,7 +68,7 @@ async function recurringState(env, from) {
   );
   const seen = new Set(done.map((r) => `${r.recurring_id}|${r.occurrence}`));
   const cards = new Map((await all(env, `SELECT * FROM sf_cards`)).map((c) => [c.id, c]));
-  return { items, seen, cards };
+  return { items, seen, cards, cashId: await cashAccountId(env) };
 }
 
 /**
@@ -71,7 +77,7 @@ async function recurringState(env, from) {
  */
 export async function syncRecurring(env, today = todayFor(env)) {
   const from = addDays(today, -LOOKBACK_DAYS);
-  const { items, seen, cards } = await recurringState(env, from);
+  const { items, seen, cards, cashId } = await recurringState(env, from);
   const stmts = [];
   for (const r of items.filter((r) => r.auto)) {
     for (const occ of occurrences(r, from, today)) {
@@ -81,7 +87,7 @@ export async function syncRecurring(env, today = todayFor(env)) {
         env.DB.prepare(
           `INSERT OR IGNORE INTO sf_transactions (kind, amount, date, charge_date, category_id, account_id, card_id, owner_id, recurring_id, occurrence, note, source)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'recurring')`
-        ).bind(r.kind, r.amount, occ, chargeDate(occ, card), r.category_id, card ? card.account_id : r.account_id, card ? card.id : null,
+        ).bind(r.kind, r.amount, occ, chargeDate(occ, card), r.category_id, card ? card.account_id : r.account_id ?? cashId, card ? card.id : null,
           r.owner_id, r.id, occ, r.name)
       );
     }
@@ -92,7 +98,7 @@ export async function syncRecurring(env, today = todayFor(env)) {
 
 /** Occurrences (recorded or not) of the recurring items between from..to, minus recorded and skipped. */
 async function openOccurrences(env, from, to, today) {
-  const { items, seen, cards } = await recurringState(env, addDays(today, -LOOKBACK_DAYS));
+  const { items, seen, cards, cashId } = await recurringState(env, addDays(today, -LOOKBACK_DAYS));
   const out = [];
   for (const r of items) {
     const card = r.card_id ? cards.get(r.card_id) : null;
@@ -100,7 +106,7 @@ async function openOccurrences(env, from, to, today) {
       if (seen.has(`${r.id}|${occ}`)) continue;
       out.push({
         recurring_id: r.id, name: r.name, kind: r.kind, amount: r.amount, occurrence: occ,
-        charge_date: chargeDate(occ, card), account_id: card ? card.account_id : r.account_id, card_id: card ? card.id : null,
+        charge_date: chargeDate(occ, card), account_id: card ? card.account_id : r.account_id ?? cashId, card_id: card ? card.id : null,
         category_id: r.category_id, owner_id: r.owner_id, auto: r.auto === 1,
       });
     }
@@ -115,16 +121,29 @@ export async function pendingRecurring(env, today = todayFor(env)) {
 }
 
 // ------------------------------------------------------------------ balances
+/** Balance of every account on `asOf`: opening balance + income/expenses charged + other moves. */
 export async function balances(env, asOf) {
   return all(
     env,
-    `SELECT a.id, a.name, a.bank, a.owner_id, a.is_active,
-       a.opening_balance + COALESCE((
-         SELECT SUM(CASE WHEN t.kind = 'income' THEN t.amount ELSE -t.amount END) FROM sf_transactions t
-         WHERE t.account_id = a.id AND t.charge_date >= a.opening_date AND t.charge_date <= ?1), 0) AS balance
-     FROM sf_accounts a ORDER BY a.is_active DESC, a.sort, a.id`,
+    `SELECT a.id, a.name, a.bank, a.kind, a.owner_id, a.is_active,
+       a.opening_balance
+       + COALESCE((SELECT SUM(CASE WHEN t.kind = 'income' THEN t.amount ELSE -t.amount END) FROM sf_transactions t
+           WHERE t.account_id = a.id AND t.charge_date >= a.opening_date AND t.charge_date <= ?1), 0)
+       + COALESCE((SELECT SUM(m.amount) FROM sf_account_moves m
+           WHERE m.account_id = a.id AND m.date >= a.opening_date AND m.date <= ?1), 0) AS balance
+     FROM sf_accounts a ORDER BY a.is_active DESC, a.kind, a.sort, a.id`,
     asOf
   );
+}
+
+/** Money held for others: each fund with what is still held (and the total). */
+export async function heldFunds(env) {
+  const funds = await all(
+    env,
+    `SELECT f.*, COALESCE((SELECT SUM(m.held_amount) FROM sf_account_moves m WHERE m.held_id = f.id), 0) AS balance
+     FROM sf_held_funds f ORDER BY f.is_active DESC, f.id`
+  );
+  return { funds, total: funds.filter((f) => f.is_active).reduce((s, f) => s + f.balance, 0) };
 }
 
 // ------------------------------------------------------------------ forecast
@@ -180,6 +199,11 @@ export async function forecast(env, to, today = todayFor(env)) {
     });
   }
   events.push(...bills.values());
+
+  // future-dated transfers / corrections / held money
+  for (const m of await all(env, `SELECT * FROM sf_account_moves WHERE account_id IS NOT NULL AND date > ? AND date <= ?`, today, to)) {
+    events.push({ type: 'move', id: m.id, date: m.date, account_id: m.account_id, name: m.note || 'העברה', amount: m.amount });
+  }
 
   events.sort((a, b) => a.date.localeCompare(b.date) || b.amount - a.amount);
   let running = start;

@@ -7,7 +7,7 @@
 // Round: m = menu (1 expense, 2 income, 3 month status, 0 end) -> a = amount in shekels -> c = category
 //        -> p = payment (card / account / cash) -> k = confirm (1 save, 2 cancel)
 import { all, first, nowSec, run } from './db.js';
-import { insertTransaction, summary, balances, syncRecurring, todayFor, forecast } from './money.js';
+import { insertTransaction, summary, balances, syncRecurring, todayFor, forecast, heldFunds } from './money.js';
 import { addDays, monthRange } from './dates.js';
 import { getSettings } from './settings.js';
 import { normalizePhone } from './validate.js';
@@ -109,7 +109,7 @@ async function round(env, c) {
   // payment: cards (expenses only), then bank accounts, 0 = cash
   const methods = [
     ...(kind === 'expense' ? (await all(env, `SELECT id, name, kind FROM sf_cards WHERE is_active = 1 ORDER BY sort, id`)).map((x) => ({ card_id: x.id, name: `כרטיס ${x.name}` })) : []),
-    ...(await all(env, `SELECT id, name FROM sf_accounts WHERE is_active = 1 ORDER BY sort, id`)).map((x) => ({ account_id: x.id, name: `חשבון ${x.name}` })),
+    ...(await all(env, `SELECT id, name FROM sf_accounts WHERE is_active = 1 AND kind = 'bank' ORDER BY sort, id`)).map((x) => ({ account_id: x.id, name: `חשבון ${x.name}` })),
   ].slice(0, 99);
   const pv = v('p');
   if (pv === undefined) {
@@ -140,13 +140,17 @@ async function round(env, c) {
 async function status(env) {
   const today = todayFor(env);
   const { from, to } = monthRange(today.slice(0, 7));
-  const [sum, accs, fc] = await Promise.all([summary(env, from, to), balances(env, today), forecast(env, addDays(today, 7), today)]);
-  const total = accs.filter((a) => a.is_active).reduce((s, a) => s + a.balance, 0);
+  const [sum, accs, fc, held] = await Promise.all([summary(env, from, to), balances(env, today), forecast(env, addDays(today, 7), today), heldFunds(env)]);
+  const active = accs.filter((a) => a.is_active);
+  const bank = active.filter((a) => a.kind === 'bank').reduce((s, a) => s + a.balance, 0);
+  const cash = active.filter((a) => a.kind === 'cash').reduce((s, a) => s + a.balance, 0);
   const out = [
     t(`החודש נכנסו ${speakMoney(sum.income)}`),
     t(`ויצאו ${speakMoney(sum.expense)}`),
-    t(`יתרה בחשבונות ${speakMoney(total)}`),
+    t(`יתרה בבנק ${speakMoney(bank)}`),
   ];
+  if (cash) out.push(t(`במזומן ${speakMoney(cash)}`));
+  if (held.total) out.push(t(`מתוך זה ${speakMoney(held.total)} של אחרים, ושלך ${speakMoney(bank + cash - held.total)}`));
   const week = fc.events.reduce((s, e) => s + e.amount, 0);
   if (fc.events.length) out.push(t(`בשבוע הקרוב צפויים ${speakMoney(Math.abs(week))} ${week < 0 ? 'לצאת' : 'להיכנס'}`));
   return out;

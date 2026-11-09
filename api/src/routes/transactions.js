@@ -2,7 +2,8 @@
 import { all, first, nowIso, run, setClause } from '../db.js';
 import { badRequest, json, noContent, notFound, readJson } from '../http.js';
 import { addDays, chargeDate, monthRange, shiftMonth } from '../dates.js';
-import { balances, checkCategory, forecast, insertTransaction, pendingRecurring, resolvePayment, summary, syncRecurring, todayFor } from '../money.js';
+import { movesBetween } from './moves.js';
+import { balances, heldFunds, checkCategory, forecast, insertTransaction, pendingRecurring, resolvePayment, summary, syncRecurring, todayFor } from '../money.js';
 import { fields, id, isDate } from '../validate.js';
 
 const txFields = (body, partial) =>
@@ -44,7 +45,11 @@ export async function list({ env, url }) {
   }
   if (p.get('q')) { where.push('t.note LIKE ?'); args.push(`%${p.get('q').slice(0, 50)}%`); }
   const rows = await all(env, `${SELECT_TX} WHERE ${where.join(' AND ')} ORDER BY t.date DESC, t.id DESC LIMIT 2000`, ...args);
-  return json({ from, to, items: rows });
+  // corrections, transfers and held money (not income/expenses), unless the list is filtered
+  const filtered = ['kind', 'category_id', 'card_id', 'owner_id', 'q'].some((k) => p.get(k));
+  let moves = filtered ? [] : await movesBetween(env, from, to);
+  if (p.get('account_id')) moves = moves.filter((m) => m.account_id === Number(p.get('account_id')));
+  return json({ from, to, items: rows, moves });
 }
 
 export async function create({ env, request, actor }) {
@@ -129,15 +134,16 @@ export async function dashboard({ env }) {
   const [y, m] = today.split('-').map(Number);
   const [py, pm] = shiftMonth(y, m, -1);
   const prev = monthRange(`${py}-${String(pm).padStart(2, '0')}`);
-  const [now, before, accounts, pending, fc, recent] = await Promise.all([
+  const [now, before, accounts, pending, fc, recent, held] = await Promise.all([
     summary(env, month.from, month.to),
     summary(env, prev.from, prev.to),
     balances(env, today),
     pendingRecurring(env, today),
     forecast(env, addDays(today, 30), today),
     all(env, `${SELECT_TX} ORDER BY t.created_at DESC, t.id DESC LIMIT 8`),
+    heldFunds(env),
   ]);
-  return json({ today, month: now, previous_month: before, accounts, pending, forecast: fc, recent });
+  return json({ today, month: now, previous_month: before, accounts, pending, forecast: fc, recent, held });
 }
 
 /** GET /forecast?days=60 (or to=YYYY-MM-DD) */

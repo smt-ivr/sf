@@ -19,8 +19,23 @@ const MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 
 const parse = (d) => { const [y, m, day] = d.split('-').map(Number); return new Date(y, m - 1, day); };
 /** '2026-11-09' -> "9.11" */
 export const shortDate = (d) => (d ? `${Number(d.slice(8, 10))}.${Number(d.slice(5, 7))}` : '');
-/** '2026-11-09' -> "יום שני, 9 בנובמבר" */
-export const longDate = (d) => { const t = parse(d); return `יום ${DAYS[t.getDay()]}, ${t.getDate()} ב${MONTHS[t.getMonth()]}`; };
+/** 1..30 -> "א׳" ... "ל׳" (15 = ט״ו, 16 = ט״ז) */
+export function gematria(n) {
+  const ones = ['', 'א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ז', 'ח', 'ט'];
+  const tens = ['', 'י', 'כ', 'ל'];
+  let s = n === 15 ? 'טו' : n === 16 ? 'טז' : tens[Math.floor(n / 10)] + ones[n % 10];
+  return s.length === 1 ? `${s}׳` : `${s.slice(0, -1)}״${s.slice(-1)}`;
+}
+const hebFmt = new Intl.DateTimeFormat('he-u-ca-hebrew', { timeZone: 'UTC', day: 'numeric', month: 'long' });
+/** '2026-11-10' -> "ל׳ חשוון" */
+export function hebDate(d) {
+  const parts = hebFmt.formatToParts(new Date(`${d}T00:00:00Z`));
+  const day = Number(parts.find((p) => p.type === 'day').value);
+  const month = parts.find((p) => p.type === 'month').value.replace(/^ב/, '');
+  return `${gematria(day)} ${month}`;
+}
+/** '2026-11-09' -> "יום שני, 9 בנובמבר · כ״ט חשוון" */
+export const longDate = (d) => { const t = parse(d); return `יום ${DAYS[t.getDay()]}, ${t.getDate()} ב${MONTHS[t.getMonth()]} · ${hebDate(d)}`; };
 /** '2026-11' -> "נובמבר 2026" */
 export const monthName = (ym) => `${MONTHS[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
 export function shiftMonth(ym, n) {
@@ -132,7 +147,8 @@ export const num = (v) => (v === '' || v == null ? null : Number(v));
 /** Display name of where money came from/went to. */
 export function paymentName(t, lk) {
   if (t.card_id) { const c = lk.cards.find((x) => x.id === t.card_id); return c ? `${c.name}${c.last4 ? ` ${c.last4}` : ''}` : 'כרטיס'; }
-  if (t.account_id) { const a = lk.accounts.find((x) => x.id === t.account_id); return a ? a.name : 'חשבון'; }
+  if (t.account_id) { const a = lk.accounts.find((x) => x.id === t.account_id); return a ? (a.kind === 'cash' ? `💵 ${a.name}` : a.name) : 'חשבון'; }
   return 'מזומן';
 }
+export const accIcon = (a) => (a.kind === 'cash' ? '💵' : '🏦');
 export const userName = (id, lk) => (id ? lk.users.find((u) => u.id === id)?.name ?? '' : 'משותף');

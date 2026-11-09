@@ -1,11 +1,14 @@
 // Home: this month at a glance, balances, items waiting for confirmation, the next 30 days.
 import { useState } from 'preact/hooks';
 import { api } from '../api.js';
-import { ErrorBox, Field, html, Loading, Modal, money, monthName, shortDate, toast, toInput, useApi, useForm, paymentName } from '../ui.js';
+import { accIcon, ErrorBox, Field, hebDate, html, Loading, Modal, money, monthName, shortDate, toast, toInput, useApi, useForm, paymentName } from '../ui.js';
+import { AccountModal, HeldModal } from './money.js';
 
 export function Home({ version, lookups, openEntry, refresh }) {
   const { data, error, loading, reload } = useApi('/dashboard', [version]);
   const [confirming, setConfirming] = useState(null);
+  const [account, setAccount] = useState(null);
+  const [held, setHeld] = useState(false);
   if (error) return html`<${ErrorBox} error=${error} retry=${reload} />`;
   if (!data) return html`<${Loading} />`;
   const { month, previous_month: prev, accounts, pending, forecast: fc, recent } = data;
@@ -13,7 +16,7 @@ export function Home({ version, lookups, openEntry, refresh }) {
   const total = active.reduce((s, a) => s + a.balance, 0);
   const catName = (id) => lookups.categories.find((c) => c.id === id)?.name;
 
-  if (!lookups.accounts.length) {
+  if (!lookups.accounts.some((a) => a.kind === 'bank')) {
     return html`<div class="card welcome">
       <h2>ברוכים הבאים 👋</h2>
       <p>כדי להתחיל, מגדירים את חשבונות הבנק ואת כרטיסי האשראי, ואחר כך את ההכנסות וההוצאות הקבועות (משכורות, הוראות קבע).</p>
@@ -23,7 +26,7 @@ export function Home({ version, lookups, openEntry, refresh }) {
 
   return html`
     <section class="card month">
-      <div class="month-head"><h2>${monthName(data.today.slice(0, 7))}</h2><a class="link small" href="#/tx">לכל התנועות</a></div>
+      <div class="month-head"><h2>${monthName(data.today.slice(0, 7))} <span class="muted small">${hebDate(data.today)}</span></h2><a class="link small" href="#/tx">לכל התנועות</a></div>
       <div class="kpis">
         <div><span class="muted small">הכנסות</span><b class="income">${money(month.income)}</b></div>
         <div><span class="muted small">הוצאות</span><b class="expense">${money(month.expense)}</b></div>
@@ -45,7 +48,11 @@ export function Home({ version, lookups, openEntry, refresh }) {
 
     <section class="card">
       <div class="month-head"><h3>יתרות</h3><b class=${total < 0 ? 'expense' : ''}>${money(total)}</b></div>
-      ${active.map((a) => html`<div class="list-row"><span>🏦 ${a.name} <span class="muted small">${a.bank}</span></span><b class=${a.balance < 0 ? 'expense' : ''}>${money(a.balance)}</b></div>`)}
+      ${active.map((a) => html`<button class="list-row tx" onClick=${() => setAccount(a)}><span>${accIcon(a)} ${a.name} <span class="muted small">${a.kind === 'cash' ? 'לחצו לעדכון' : a.bank}</span></span><b class=${a.balance < 0 ? 'expense' : ''}>${money(a.balance)}</b></button>`)}
+      ${data.held.total !== 0 && html`<div class="list-row held-row"><span>מתוך זה של אחרים</span><b>${money(-data.held.total)}</b></div>
+        <div class="list-row"><b>שלך באמת</b><b class=${total - data.held.total < 0 ? 'expense' : 'income'}>${money(total - data.held.total)}</b></div>
+        ${total - data.held.total < 0 && html`<p class="small expense">השתמשת ב-${money(data.held.total - total)} מכסף של אחרים.</p>`}`}
+      <div class="actions"><button class="btn small" onClick=${() => setHeld(true)}>🤝 כסף של אחרים${data.held.total ? ` (${money(data.held.total)})` : ''}</button></div>
       ${fc.events.length > 0 && html`<p class=${`small ${fc.lowest.balance < 0 ? 'expense' : 'muted'}`}>
         צפי בעוד 30 יום: ${money(fc.end_balance)}${fc.lowest.balance < total ? ` · הנקודה הנמוכה: ${money(fc.lowest.balance)} ב-${shortDate(fc.lowest.date)}` : ''}
       </p>`}
@@ -69,6 +76,8 @@ export function Home({ version, lookups, openEntry, refresh }) {
       </button>`)}
     </section>
 
+    ${account && html`<${AccountModal} account=${account} lookups=${lookups} onClose=${() => setAccount(null)} onDone=${() => { setAccount(null); refresh(); }} />`}
+    ${held && html`<${HeldModal} lookups=${lookups} onClose=${() => setHeld(false)} onDone=${refresh} />`}
     ${confirming && html`<${ConfirmRecurring} item=${confirming} onClose=${() => setConfirming(null)} onDone=${() => { setConfirming(null); refresh(); }} />`}
   `;
 }

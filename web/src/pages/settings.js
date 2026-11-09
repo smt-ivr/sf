@@ -14,10 +14,10 @@ export function Settings(props) {
     <a class="card nav-card" href="#/recurring"><span>↻ הכנסות והוצאות קבועות</span><span class="muted small">משכורות, הוראות קבע, מנויים ›</span></a>
 
     <section class="card">
-      <div class="month-head"><h3>חשבונות בנק</h3><button class="btn small" onClick=${() => setOpen({ type: 'account', item: {} })}>+ חשבון</button></div>
+      <div class="month-head"><h3>חשבונות ומזומן</h3><button class="btn small" onClick=${() => setOpen({ type: 'account', item: {} })}>+ חשבון</button></div>
       ${!lookups.accounts.length && html`<p class="muted small">מתחילים כאן: הוסיפו את חשבונות הבנק שלכם.</p>`}
       ${lookups.accounts.map((a) => html`<button class=${`list-row tx ${a.is_active ? '' : 'inactive'}`} onClick=${() => setOpen({ type: 'account', item: a })}>
-        <span><b>🏦 ${a.name}</b><span class="muted small">${[a.bank, a.branch && `סניף ${a.branch}`, a.number, userName(a.owner_id, lookups), !a.is_active && 'לא פעיל'].filter(Boolean).join(' · ')}</span></span><span class="muted">›</span>
+        <span><b>${a.kind === 'cash' ? '💵' : '🏦'} ${a.name}</b><span class="muted small">${[a.bank, a.branch && `סניף ${a.branch}`, a.number, userName(a.owner_id, lookups), !a.is_active && 'לא פעיל'].filter(Boolean).join(' · ')}</span></span><span class="muted">›</span>
       </button>`)}
     </section>
 
@@ -62,19 +62,20 @@ const ActiveSelect = ({ value, onChange }) => html`<select value=${value} onChan
 const Buttons = ({ f, item, remove }) => html`<div class="actions"><button class="btn primary" disabled=${f.busy}>שמירה</button>${item.id && html`<button type="button" class="btn danger" onClick=${remove}>מחיקה</button>`}</div>`;
 
 function AccountForm({ item, lookups, onClose, onSaved }) {
-  const f = useForm({ name: item.name || '', bank: item.bank || '', branch: item.branch || '', number: item.number || '', owner_id: item.owner_id ?? '', opening_balance: toInput(item.opening_balance ?? 0), opening_date: item.opening_date || lookups.today, is_active: item.is_active ?? 1 });
+  const f = useForm({ kind: item.kind || 'bank', name: item.name || '', bank: item.bank || '', branch: item.branch || '', number: item.number || '', owner_id: item.owner_id ?? '', opening_balance: toInput(item.opening_balance ?? 0), opening_date: item.opening_date || lookups.today, is_active: item.is_active ?? 1 });
   const { save, remove } = crud('/accounts', item, onSaved);
   const v = f.values;
   const submit = (e) => { e.preventDefault(); save(f, { ...v, owner_id: num(v.owner_id), is_active: Boolean(Number(v.is_active)) }); };
-  return html`<${Modal} title=${item.id ? 'חשבון בנק' : 'חשבון בנק חדש'} onClose=${onClose}><form onSubmit=${submit}>
-    <${Field} label="שם" error=${f.errors.name}><input value=${v.name} onInput=${f.set('name')} placeholder="עו״ש משותף" required /><//>
-    <div class="row2">
+  return html`<${Modal} title=${item.id ? v.name || 'חשבון' : 'חשבון חדש'} onClose=${onClose}><form onSubmit=${submit}>
+    <${Segments} value=${v.kind} onChange=${f.set('kind')} options=${[{ value: 'bank', label: '🏦 חשבון בנק' }, { value: 'cash', label: '💵 מזומן (ארנק)' }]} />
+    <${Field} label="שם" error=${f.errors.name}><input value=${v.name} onInput=${f.set('name')} placeholder=${v.kind === 'cash' ? 'מזומן' : 'עו״ש משותף'} required /><//>
+    ${v.kind === 'bank' && html`<div class="row2">
       <${Field} label="בנק"><input value=${v.bank} onInput=${f.set('bank')} list="banks" /><//>
       <${Field} label="סניף"><input value=${v.branch} onInput=${f.set('branch')} inputmode="numeric" /><//>
-    </div>
+    </div>`}
     <datalist id="banks">${['הפועלים', 'לאומי', 'דיסקונט', 'מזרחי טפחות', 'הבינלאומי', 'מרכנתיל', 'ירושלים', 'יהב', 'מסד', 'אוצר החייל', 'וואן זירו', 'הדואר'].map((b) => html`<option value=${b} />`)}</datalist>
     <div class="row2">
-      <${Field} label="מספר חשבון"><input value=${v.number} onInput=${f.set('number')} inputmode="numeric" dir="ltr" /><//>
+      ${v.kind === 'bank' && html`<${Field} label="מספר חשבון"><input value=${v.number} onInput=${f.set('number')} inputmode="numeric" dir="ltr" /><//>`}
       <${Field} label="של מי"><${OwnerSelect} value=${v.owner_id} onChange=${f.set('owner_id')} lookups=${lookups} /><//>
     </div>
     <div class="row2">

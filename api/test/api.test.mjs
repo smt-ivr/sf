@@ -167,6 +167,70 @@ test('phone line: key, caller ID, an expense on a card, and no double save on re
   assert.equal(items[0].card_id, regular.id);
   assert.equal(items[0].category_id, food.id);
 
-  assert.match(await ivr(app, { ...done, m1: '3' }), /יתרה בחשבונות.*=m2,/);
+  assert.match(await ivr(app, { ...done, m1: '3' }), /יתרה בבנק.*=m2,/);
   assert.match(await ivr(app, { ...done, m1: '3', m2: '0' }), /להתראות/);
+});
+
+test('dates: Hebrew-calendar recurring item (Rosh Chodesh)', () => {
+  const r = { calendar: 'hebrew', day_of_month: 1, interval_months: 1, start_date: '2026-11-01', end_date: null };
+  // 1 Kislev, 1 Tevet, 1 Shevat 5787
+  assert.deepEqual(occurrences(r, '2026-11-01', '2027-01-31'), ['2026-11-11', '2026-12-11', '2027-01-09']);
+  // day 30 in a 29-day month falls on the 29th
+  assert.equal(occurrences({ ...r, day_of_month: 30 }, '2026-12-12', '2027-01-09').length, 1);
+});
+
+test('cash wallet, balance correction, transfer, and money held for others', async () => {
+  const { app, acc } = await ready();
+  const lk = (await app.call('GET', '/lookups')).data;
+  const wallet = lk.accounts.find((a) => a.kind === 'cash');
+  assert.ok(wallet, 'a cash wallet exists');
+
+  // a cash expense goes into the wallet
+  const today = todayFor(app.env);
+  const tx = await app.call('POST', '/transactions', { kind: 'expense', amount: 50, date: today });
+  assert.equal(tx.data.account_id, wallet.id);
+
+  // "I have 300 in cash now"
+  const sb = await app.call('POST', `/accounts/${wallet.id}/balance`, { balance: 300 });
+  assert.equal(sb.status, 200);
+  assert.equal(sb.data.difference, 35000);
+  // withdraw 200 from the bank into the wallet
+  assert.equal((await app.call('POST', '/transfers', { from_account_id: acc.id, to_account_id: wallet.id, amount: 200 })).status, 201);
+  let bal = (await app.call('GET', '/dashboard')).data.accounts;
+  assert.equal(bal.find((a) => a.id === wallet.id).balance, 50000);
+  assert.equal(bal.find((a) => a.id === acc.id).balance, 80000);
+  // the month list shows the moves, not as income/expense
+  const list = (await app.call('GET', `/transactions?month=${today.slice(0, 7)}`)).data;
+  assert.equal(list.moves.length, 3);
+  assert.equal((await app.call('GET', `/summary?month=${today.slice(0, 7)}`)).data.income, 0);
+  // deleting one half of a transfer removes both
+  const half = list.moves.find((m) => m.kind === 'transfer');
+  await app.call('DELETE', `/moves/${half.id}`);
+  bal = (await app.call('GET', '/dashboard')).data.accounts;
+  assert.equal(bal.find((a) => a.id === acc.id).balance, 100000);
+
+  // 600 of Reuven's money is already inside the bank balance
+  const h = await app.call('POST', '/held', { name: 'ראובן', amount: 600, in_balance: true });
+  assert.equal(h.status, 201);
+  let dash = (await app.call('GET', '/dashboard')).data;
+  assert.equal(dash.held.total, 60000);
+  assert.equal(dash.accounts.find((a) => a.id === acc.id).balance, 100000); // unchanged
+  // returning 250 to him from the bank
+  assert.equal((await app.call('POST', `/held/${h.data.id}/moves`, { direction: 'out', amount: 250, account_id: acc.id })).status, 201);
+  assert.equal((await app.call('POST', `/held/${h.data.id}/moves`, { direction: 'out', amount: 9999, account_id: acc.id })).status, 400);
+  dash = (await app.call('GET', '/dashboard')).data;
+  assert.equal(dash.held.total, 35000);
+  assert.equal(dash.accounts.find((a) => a.id === acc.id).balance, 75000);
+  assert.equal((await app.call('GET', '/held')).data.funds[0].moves.length, 2);
+});
+
+test('recurring by the Hebrew calendar is validated', async () => {
+  const { app, acc } = await ready();
+  const bad = await app.call('POST', '/recurring', { kind: 'income', name: 'כולל', amount: 3000, account_id: acc.id, day_of_month: 1, calendar: 'hebrew', interval_months: 2 });
+  assert.equal(bad.status, 422);
+  const ok = await app.call('POST', '/recurring', { kind: 'income', name: 'כולל', amount: 3000, account_id: acc.id, day_of_month: 1, calendar: 'hebrew', auto: false });
+  assert.equal(ok.status, 201);
+  assert.equal(ok.data.calendar, 'hebrew');
+  const fc = (await app.call('GET', '/forecast?days=60')).data;
+  assert.ok(fc.events.some((e) => e.recurring_id === ok.data.id));
 });

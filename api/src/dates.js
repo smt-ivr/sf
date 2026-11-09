@@ -35,11 +35,42 @@ export function monthRange(ym) {
   return { from: fmt(y, m, 1), to: fmt(y, m, daysInMonth(y, m)) };
 }
 
+// ------------------------------------------------------------------ Hebrew calendar
+const hebFmt = new Intl.DateTimeFormat('en-u-ca-hebrew', { timeZone: 'UTC', day: 'numeric', month: 'numeric', year: 'numeric' });
+/** Day of the Hebrew month (1-30) of a 'YYYY-MM-DD' date. */
+export function hebrewDay(date) {
+  const [y, m, d] = parts(date);
+  return Number(hebFmt.formatToParts(new Date(Date.UTC(y, m - 1, d))).find((p) => p.type === 'day').value);
+}
+
+/**
+ * Dates between from..to that fall on day `day` of the Hebrew month. Day 30 in a 29-day month falls
+ * on the 29th (the last day), like the 31st of a short Gregorian month.
+ */
+export function hebrewOccurrences(day, from, to) {
+  const out = [];
+  let prev = null;
+  for (let d = from; d <= to; d = addDays(d, 1)) {
+    const hd = prev === null ? hebrewDay(d) : prev;
+    const next = hebrewDay(addDays(d, 1));
+    if (hd === day || (day === 30 && hd === 29 && next === 1)) out.push(d);
+    prev = next;
+    if (out.length > 1000) break; // safety
+  }
+  return out;
+}
+
 /**
  * Occurrence dates of a recurring item between from..to (inclusive).
- * r = { day_of_month, interval_months, start_date, end_date }
+ * r = { day_of_month, interval_months, start_date, end_date, calendar? }
+ * Hebrew items are monthly (Hebrew months differ in number from year to year).
  */
 export function occurrences(r, from, to) {
+  if (r.calendar === 'hebrew') {
+    const start = from > r.start_date ? from : r.start_date;
+    const end = r.end_date && r.end_date < to ? r.end_date : to;
+    return start <= end ? hebrewOccurrences(r.day_of_month, start, end) : [];
+  }
   const out = [];
   const [sy, sm] = parts(r.start_date);
   const step = r.interval_months || 1;

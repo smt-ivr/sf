@@ -7,6 +7,7 @@ import * as auth from './routes/auth.js';
 import * as setup from './routes/setup.js';
 import * as tx from './routes/transactions.js';
 import * as users from './routes/users.js';
+import * as moves from './routes/moves.js';
 
 const PUBLIC = { auth: 'none' };
 
@@ -53,6 +54,14 @@ export const router = new Router()
   .post('/categories', setup.createCategory)
   .patch('/categories/:id', setup.patchCategory)
   .delete('/categories/:id', setup.deleteCategory)
+  .post('/accounts/:id/balance', moves.setBalance)
+  .post('/transfers', moves.transfer)
+  .delete('/moves/:id', moves.removeMove)
+  .get('/held', moves.listHeld)
+  .post('/held', moves.createHeld)
+  .patch('/held/:id', moves.patchHeld)
+  .delete('/held/:id', moves.deleteHeld)
+  .post('/held/:id/moves', moves.addHeldMove)
   .get('/users', users.list)
   .post('/users', users.create)
   .patch('/users/:id', users.patch)

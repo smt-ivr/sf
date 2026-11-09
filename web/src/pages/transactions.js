@@ -1,8 +1,11 @@
 // Entries of a month, grouped by day, with filters. Tap an entry to edit it.
 import { useState } from 'preact/hooks';
-import { ErrorBox, html, Loading, longDate, money, monthName, paymentName, shiftMonth, useApi, userName } from '../ui.js';
+import { api } from '../api.js';
+import { confirmBox, ErrorBox, html, Loading, longDate, money, monthName, paymentName, shiftMonth, toast, useApi, userName } from '../ui.js';
 
-export function Transactions({ version, lookups, openEntry }) {
+const MOVE_ICON = { adjust: '⚖', transfer: '⇄', held: '🤝' };
+
+export function Transactions({ version, lookups, openEntry, refresh }) {
   const [month, setMonth] = useState(lookups.today.slice(0, 7));
   const [kind, setKind] = useState('');
   const [pay, setPay] = useState('');
@@ -19,11 +22,15 @@ export function Transactions({ version, lookups, openEntry }) {
 
   let items = data?.items || [];
   if (q) items = items.filter((t) => `${t.note} ${catName(t.category_id) || ''}`.includes(q));
-  const groups = [];
-  for (const t of items) {
-    if (groups.at(-1)?.date !== t.date) groups.push({ date: t.date, items: [] });
-    groups.at(-1).items.push(t);
-  }
+  const moves = q ? [] : (data?.moves || []).filter((m) => m.account_id); // held money already inside the balance moves nothing
+  const byDate = new Map();
+  for (const t of items) (byDate.get(t.date) || byDate.set(t.date, { date: t.date, items: [], moves: [] }).get(t.date)).items.push(t);
+  for (const m of moves) (byDate.get(m.date) || byDate.set(m.date, { date: m.date, items: [], moves: [] }).get(m.date)).moves.push(m);
+  const groups = [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date));
+  const removeMove = async (m) => {
+    if (!(await confirmBox(m.kind === 'transfer' ? 'למחוק את ההעברה (משני הצדדים)?' : 'למחוק את הרישום?', { ok: 'מחיקה', danger: true }))) return;
+    api.del(`/moves/${m.id}`).then(() => { toast('נמחק'); refresh(); }, (e) => toast(e.message, 'bad'));
+  };
   const inc = items.filter((t) => t.kind === 'income').reduce((s, t) => s + t.amount, 0);
   const exp = items.filter((t) => t.kind === 'expense').reduce((s, t) => s + t.amount, 0);
 
@@ -44,13 +51,17 @@ export function Transactions({ version, lookups, openEntry }) {
     ${error && html`<${ErrorBox} error=${error} retry=${reload} />`}
     ${!data && !error && html`<${Loading} />`}
     ${data && html`<div class="totals small"><span>הכנסות <b class="income">${money(inc)}</b></span><span>הוצאות <b class="expense">${money(exp)}</b></span><span>${items.length} תנועות</span></div>`}
-    ${data && !items.length && html`<p class="muted center">אין תנועות</p>`}
+    ${data && !groups.length && html`<p class="muted center">אין תנועות</p>`}
     ${groups.map((g) => html`<section class="card day">
       <h4>${longDate(g.date)}</h4>
       ${g.items.map((t) => html`<button class="list-row tx" onClick=${() => openEntry(t)}>
         <span><b>${t.note || catName(t.category_id) || (t.kind === 'income' ? 'הכנסה' : 'הוצאה')}</b>
           <span class="muted small">${[t.note && catName(t.category_id), paymentName(t, lookups), userName(t.owner_id, lookups), t.charge_date !== t.date && `חיוב ${t.charge_date.slice(8)}/${t.charge_date.slice(5, 7)}`, t.source === 'phone' && '☎', t.source === 'recurring' && '↻'].filter(Boolean).join(' · ')}</span></span>
         <b class=${t.kind}>${t.kind === 'expense' ? '−' : '+'}${money(t.amount)}</b>
+      </button>`)}
+      ${g.moves.map((m) => html`<button class="list-row tx move" onClick=${() => removeMove(m)} title="לחיצה למחיקה">
+        <span><b>${MOVE_ICON[m.kind]} ${m.note || 'העברה'}</b><span class="muted small">${m.account_name}${m.held_name ? ` · ${m.held_name}` : ''} · לא נספר כהכנסה/הוצאה</span></span>
+        <b class="muted">${m.amount > 0 ? '+' : '−'}${money(Math.abs(m.amount))}</b>
       </button>`)}
     </section>`)}
   `;

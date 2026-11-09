@@ -71,8 +71,8 @@ export function EntryForm({ tx, lookups, me, onClose, onSaved }) {
       <div class="label">${v.kind === 'expense' ? 'איך שולם' : 'לאן נכנס'}</div>
       <div class="chips">
         ${v.kind === 'expense' && cards.map((c) => html`<button type="button" class=${v.pay === `c${c.id}` ? 'chip on' : 'chip'} onClick=${() => f.set('pay')(`c${c.id}`)}>💳 ${c.name}${c.last4 ? ` ${c.last4}` : ''}<small>${c.kind === 'direct' ? 'דיירקט' : `חיוב ב-${c.billing_day}`}</small></button>`)}
-        ${accounts.map((a) => html`<button type="button" class=${v.pay === `a${a.id}` ? 'chip on' : 'chip'} onClick=${() => f.set('pay')(`a${a.id}`)}>🏦 ${a.name}<small>${v.kind === 'expense' ? 'העברה / הוראת קבע' : a.bank}</small></button>`)}
-        <button type="button" class=${v.pay === 'cash' ? 'chip on' : 'chip'} onClick=${() => f.set('pay')('cash')}>💵 מזומן</button>
+        ${accounts.map((a) => html`<button type="button" class=${v.pay === `a${a.id}` ? 'chip on' : 'chip'} onClick=${() => f.set('pay')(`a${a.id}`)}>${a.kind === 'cash' ? '💵' : '🏦'} ${a.name}<small>${a.kind === 'cash' ? 'מהארנק' : v.kind === 'expense' ? 'העברה / הוראת קבע' : a.bank}</small></button>`)}
+        ${!accounts.some((a) => a.kind === 'cash') && html`<button type="button" class=${v.pay === 'cash' ? 'chip on' : 'chip'} onClick=${() => f.set('pay')('cash')}>💵 מזומן</button>`}
       </div>
       ${!cards.length && !accounts.length && html`<div class="hint">עדיין אין חשבונות וכרטיסים. מוסיפים אותם בהגדרות.</div>`}
 
