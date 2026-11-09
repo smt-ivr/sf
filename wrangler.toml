@@ -1,0 +1,33 @@
+name = "sf"
+main = "api/src/index.js"
+compatibility_date = "2026-10-01"
+
+# Static files in ./web: the app (served at smti.uk/sf/). It talks to the API over HTTP only.
+[assets]
+directory = "./web"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = true   # the Worker strips BASE_PATH before looking up a file
+
+# Shares the existing "drive-pro" database (the account is at the free plan's 10-database limit).
+# Every table of this project starts with sf_, and the migrations are tracked in sf_migrations,
+# so nothing of drive-pro (logs, blocked_users, ...) is touched.
+[[d1_databases]]
+binding = "DB"
+database_name = "drive-pro"
+database_id = "2dee5e98-bf06-4aa3-991d-129ef43b1cc1"
+migrations_dir = "api/migrations"
+migrations_table = "sf_migrations"
+
+[vars]
+# Path prefix when served from the shared domain (smti.uk/sf). The workers.dev root keeps working too.
+BASE_PATH = "/sf"
+# Time zone for "today", month boundaries and charge dates.
+TZ = "Asia/Jerusalem"
+
+# No cron trigger (the free plan allows only 5 per account): recurring income/expenses are
+# recorded when someone opens the app or calls the phone line.
+workers_dev = true
+
+[observability]
+enabled = true

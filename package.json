@@ -1,0 +1,15 @@
+{
+  "name": "sf",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler d1 migrations apply drive-pro --local && wrangler dev",
+    "migrate": "wrangler d1 migrations apply drive-pro --remote",
+    "deploy": "wrangler d1 migrations apply drive-pro --remote && wrangler deploy",
+    "test": "node --test --no-warnings api/test/*.test.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

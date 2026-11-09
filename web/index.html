@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#1f7a5a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="הכנסות והוצאות">
+  <title>הכנסות והוצאות</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="styles.css">
+  <script type="importmap">
+    { "imports": {
+        "preact": "./vendor/preact.js",
+        "preact/hooks": "./vendor/preact-hooks.js",
+        "htm": "./vendor/htm.js"
+    } }
+  </script>
+</head>
+<body>
+  <div id="app"><div class="boot">טוען…</div></div>
+  <script>
+    // If the app fails to start, show why instead of an endless "loading".
+    (function () {
+      function show(msg) {
+        var el = document.getElementById('app');
+        if (el && el.querySelector('.boot')) el.innerHTML = '<div class="boot" style="flex-direction:column;gap:8px;text-align:center;padding:16px"><b>שגיאה בטעינה</b><code dir="ltr" style="white-space:pre-wrap">' + String(msg).replace(/</g, '&lt;') + '</code></div>';
+      }
+      window.addEventListener('error', function (e) { show((e.message || 'error') + (e.filename ? ' @ ' + e.filename + ':' + e.lineno : '')); }, true);
+      window.addEventListener('unhandledrejection', function (e) { show(e.reason && e.reason.message || e.reason); });
+      setTimeout(function () { show('הטעינה לוקחת יותר מדי זמן. ייתכן שהדפדפן ישן מדי'); }, 12000);
+    })();
+  </script>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
