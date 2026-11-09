@@ -3,6 +3,7 @@ import { all, first, nowIso, run, setClause } from '../db.js';
 import { badRequest, json, noContent, notFound, readJson } from '../http.js';
 import { addDays, chargeDate, monthRange, shiftMonth } from '../dates.js';
 import { movesBetween } from './moves.js';
+import { report, trackingStart } from '../money.js';
 import { balances, heldFunds, checkCategory, forecast, insertTransaction, pendingRecurring, resolvePayment, summary, syncRecurring, todayFor } from '../money.js';
 import { fields, id, isDate } from '../validate.js';
 
@@ -134,7 +135,8 @@ export async function dashboard({ env }) {
   const [y, m] = today.split('-').map(Number);
   const [py, pm] = shiftMonth(y, m, -1);
   const prev = monthRange(`${py}-${String(pm).padStart(2, '0')}`);
-  const [now, before, accounts, pending, fc, recent, held] = await Promise.all([
+  const start = await trackingStart(env);
+  const [now, before, accounts, pending, fc, recent, held, since] = await Promise.all([
     summary(env, month.from, month.to),
     summary(env, prev.from, prev.to),
     balances(env, today),
@@ -142,8 +144,9 @@ export async function dashboard({ env }) {
     forecast(env, addDays(today, 30), today),
     all(env, `${SELECT_TX} ORDER BY t.created_at DESC, t.id DESC LIMIT 8`),
     heldFunds(env),
+    report(env, start, today),
   ]);
-  return json({ today, month: now, previous_month: before, accounts, pending, forecast: fc, recent, held });
+  return json({ today, month: now, previous_month: before, accounts, pending, forecast: fc, recent, held, since: { ...since, tracking_start: start } });
 }
 
 /** GET /forecast?days=60 (or to=YYYY-MM-DD) */
@@ -154,6 +157,17 @@ export async function getForecast({ env, url }) {
   const days = Math.min(Math.max(Number(url.searchParams.get('days')) || 60, 1), 400);
   if (to && !isDate(to)) throw badRequest('תאריך לא תקין');
   return json({ ...(await forecast(env, to || addDays(today, days), today)), pending: await pendingRecurring(env, today) });
+}
+
+/** GET /report?from&to (default: from the day tracking started until today) */
+export async function getReport({ env, url }) {
+  await syncRecurring(env);
+  const start = await trackingStart(env);
+  const today = todayFor(env);
+  const from = url.searchParams.get('from') || start;
+  const to = url.searchParams.get('to') || today;
+  if (!isDate(from) || !isDate(to) || from > to) throw badRequest('טווח תאריכים לא תקין');
+  return json({ ...(await report(env, from, to)), tracking_start: start, today });
 }
 
 /** GET /summary?month=YYYY-MM */

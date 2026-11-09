@@ -28,6 +28,7 @@ export const router = new Router()
   .get('/dashboard', tx.dashboard)
   .get('/forecast', tx.getForecast)
   .get('/summary', tx.getSummary)
+  .get('/report', tx.getReport)
   .get('/lookups', tx.lookups)
   // entries
   .get('/transactions', tx.list)

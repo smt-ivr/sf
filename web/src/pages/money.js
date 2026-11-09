@@ -65,6 +65,12 @@ export function HeldModal({ lookups, onClose, onDone }) {
     ${data && html`
       ${data.funds.filter((f) => f.is_active || f.balance).map((f) => html`<div class="card held">
         <div class="month-head"><b>${f.name}</b><b>${money(f.balance)}</b></div>
+        <div class="row2 small">
+          <span class="muted">נמצא ב:</span>
+          <select value=${f.account_id ?? ''} onChange=${(e) => api.patch(`/held/${f.id}`, { account_id: Number(e.target.value) }).then(changed, (er) => toast(er.message, 'bad'))}>
+            ${f.account_id == null && html`<option value="">בחרו חשבון</option>`}${accountOptions(lookups)}
+          </select>
+        </div>
         ${f.note && html`<div class="muted small">${f.note}</div>`}
         ${f.moves.slice(0, 5).map((m) => html`<div class="list-row small"><span>${shortDate(m.date)} · ${m.note}${m.account_name ? ` · ${m.account_name}` : ''}</span><b class=${m.held_amount < 0 ? 'expense' : 'income'}>${money(m.held_amount)}</b></div>`)}
         <div class="actions">
@@ -89,31 +95,30 @@ function NewHeld({ lookups, onClose, onDone }) {
   const v = f.values;
   const save = (e) => {
     e.preventDefault();
-    const inBalance = v.in_balance === '1';
-    f.submit(() => api.post('/held', { name: v.name, amount: v.amount, note: v.note, date: v.date, in_balance: inBalance, account_id: inBalance ? null : Number(v.account_id) })).then((r) => r && (toast('נשמר'), onDone()));
+    f.submit(() => api.post('/held', { name: v.name, amount: v.amount, note: v.note, date: v.date, in_balance: v.in_balance === '1', account_id: Number(v.account_id) })).then((r) => r && (toast('נשמר'), onDone()));
   };
   return html`<${Modal} title="כסף של מישהו אחר" onClose=${onClose}><form onSubmit=${save}>
     <div class="row2">
       <${Field} label="של מי" error=${f.errors.name}><input value=${v.name} onInput=${f.set('name')} required /><//>
       <${Field} label="סכום (₪)" error=${f.errors.amount}><input inputmode="decimal" value=${v.amount} onInput=${f.set('amount')} required /><//>
     </div>
-    <${Field} label="הכסף…">
-      <select value=${v.in_balance} onChange=${f.set('in_balance')}>
-        <option value="1">כבר נמצא אצלי (כלול ביתרה שהזנתי)</option>
-        <option value="0">נכנס עכשיו לחשבון</option>
-      </select>
-    <//>
-    ${v.in_balance === '0' && html`<div class="row2">
-      <${Field} label="לחשבון" error=${f.errors.account_id}><select value=${v.account_id} onChange=${f.set('account_id')}>${accountOptions(lookups)}</select><//>
-      <${Field} label="תאריך"><input type="date" value=${v.date} onInput=${f.set('date')} /><//>
-    </div>`}
+    <${Field} label="באיזה חשבון הכסף נמצא" error=${f.errors.account_id} hint="לשם צריך להחזיר אותו"><select value=${v.account_id} onChange=${f.set('account_id')}>${accountOptions(lookups)}</select><//>
+    <div class="row2">
+      <${Field} label="הכסף…">
+        <select value=${v.in_balance} onChange=${f.set('in_balance')}>
+          <option value="1">כבר בחשבון (כלול ביתרה)</option>
+          <option value="0">נכנס עכשיו</option>
+        </select>
+      <//>
+      ${v.in_balance === '0' && html`<${Field} label="תאריך"><input type="date" value=${v.date} onInput=${f.set('date')} /><//>`}
+    </div>
     <${Field} label="הערה"><input value=${v.note} onInput=${f.set('note')} placeholder="למשל: עד שיבקש" /><//>
     <button class="btn primary" disabled=${f.busy}>שמירה</button>
   </form><//>`;
 }
 
 function HeldMove({ fund, direction, lookups, onClose, onDone }) {
-  const f = useForm({ amount: direction === 'out' ? toInput(fund.balance) : '', account_id: firstBank(lookups), date: lookups.today, note: '' });
+  const f = useForm({ amount: direction === 'out' ? toInput(fund.balance) : '', account_id: fund.account_id ?? firstBank(lookups), date: lookups.today, note: '' });
   const save = (e) => {
     e.preventDefault();
     const v = f.values;

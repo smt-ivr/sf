@@ -10,11 +10,13 @@ import { Forecast } from './pages/forecast.js';
 import { Settings } from './pages/settings.js';
 import { Recurring } from './pages/recurring.js';
 import { EntryForm } from './pages/entry.js';
+import { Report } from './pages/report.js';
 
 const ROUTES = {
   '': { title: 'בית', icon: '⌂', page: Home },
   tx: { title: 'תנועות', icon: '☰', page: Transactions },
   forecast: { title: 'צפי', icon: '📅', page: Forecast },
+  report: { title: 'לאן הלך הכסף', icon: '📊', page: Report },
   recurring: { title: 'קבועות', icon: '↻', page: Recurring },
   settings: { title: 'הגדרות', icon: '⚙', page: Settings },
 };
@@ -57,7 +59,7 @@ function App() {
     <nav class="bottom-nav">
       ${['', 'tx'].map((k) => html`<a href=${`#/${k}`} class=${path === k ? 'on' : ''}><span>${ROUTES[k].icon}</span>${ROUTES[k].title}</a>`)}
       <button class="fab" onClick=${() => setEntry({})} aria-label="הוספה">+</button>
-      ${['forecast', 'settings'].map((k) => html`<a href=${`#/${k}`} class=${path === k || (k === 'settings' && path === 'recurring') ? 'on' : ''}><span>${ROUTES[k].icon}</span>${ROUTES[k].title}</a>`)}
+      ${['report', 'settings'].map((k) => html`<a href=${`#/${k}`} class=${path === k || (k === 'settings' && path === 'recurring') ? 'on' : ''}><span>${ROUTES[k].icon}</span>${k === 'report' ? 'דוח' : ROUTES[k].title}</a>`)}
     </nav>
     ${entry && html`<${EntryForm} tx=${entry} lookups=${lookups} me=${me} onClose=${() => setEntry(null)} onSaved=${() => { setEntry(null); refresh(); }} />`}
   `;

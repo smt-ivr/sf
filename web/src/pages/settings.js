@@ -35,6 +35,7 @@ export function Settings(props) {
       </div>`)}
     </section>
 
+    <${TrackingStart} />
     <${Users} me=${me} onChange=${refresh} />
     <${PhoneLine} />
     <${MyPassword} />
@@ -123,6 +124,17 @@ function CategoryForm({ item, onClose, onSaved }) {
     </div>
     <${Buttons} f=${f} item=${item} remove=${remove} />
   </form><//>`;
+}
+
+function TrackingStart() {
+  const { data, reload } = useApi('/settings');
+  if (!data) return null;
+  const save = (e) => api.patch('/settings', { tracking_start: e.target.value }).then(() => (toast('נשמר'), reload()), (err) => toast(err.message, 'bad'));
+  return html`<section class="card">
+    <h3>📊 תחילת המעקב</h3>
+    <p class="hint">מהיום הזה הדוח "לאן הלך הכסף" ודף הבית סופרים הכנסות והוצאות.</p>
+    <input type="date" value=${data.tracking_start} onChange=${save} />
+  </section>`;
 }
 
 // ------------------------------------------------------------------ users

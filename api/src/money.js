@@ -140,10 +140,14 @@ export async function balances(env, asOf) {
 export async function heldFunds(env) {
   const funds = await all(
     env,
-    `SELECT f.*, COALESCE((SELECT SUM(m.held_amount) FROM sf_account_moves m WHERE m.held_id = f.id), 0) AS balance
-     FROM sf_held_funds f ORDER BY f.is_active DESC, f.id`
+    `SELECT f.*, a.name AS account_name, COALESCE((SELECT SUM(m.held_amount) FROM sf_account_moves m WHERE m.held_id = f.id), 0) AS balance
+     FROM sf_held_funds f LEFT JOIN sf_accounts a ON a.id = f.account_id ORDER BY f.is_active DESC, f.id`
   );
-  return { funds, total: funds.filter((f) => f.is_active).reduce((s, f) => s + f.balance, 0) };
+  const active = funds.filter((f) => f.is_active);
+  // per account: how much of its balance belongs to others
+  const byAccount = {};
+  for (const f of active) byAccount[f.account_id ?? 0] = (byAccount[f.account_id ?? 0] || 0) + f.balance;
+  return { funds, total: active.reduce((s, f) => s + f.balance, 0), by_account: byAccount };
 }
 
 // ------------------------------------------------------------------ forecast
@@ -216,14 +220,24 @@ export async function forecast(env, to, today = todayFor(env)) {
 export async function summary(env, from, to) {
   const rows = await all(
     env,
-    `SELECT t.kind, t.amount, t.category_id, t.owner_id, t.card_id, t.account_id, c.name AS category_name
+    `SELECT t.kind, t.amount, t.date, t.category_id, t.owner_id, t.card_id, t.account_id, c.name AS category_name
      FROM sf_transactions t LEFT JOIN sf_categories c ON c.id = t.category_id WHERE t.date BETWEEN ? AND ?`,
     from, to
   );
   const total = { income: 0, expense: 0 };
   const byCat = new Map();
   const byOwner = new Map();
+  const byPay = new Map();
+  const byDay = new Map();
   for (const r of rows) {
+    const pk = `${r.kind}|${r.card_id ? `c${r.card_id}` : `a${r.account_id ?? 0}`}`;
+    const pay = byPay.get(pk) || { kind: r.kind, card_id: r.card_id, account_id: r.card_id ? null : r.account_id, amount: 0, count: 0 };
+    pay.amount += r.amount;
+    pay.count++;
+    byPay.set(pk, pay);
+    const day = byDay.get(r.date) || { date: r.date, income: 0, expense: 0 };
+    day[r.kind] += r.amount;
+    byDay.set(r.date, day);
     total[r.kind] += r.amount;
     const ck = `${r.kind}|${r.category_id ?? 0}`;
     const c = byCat.get(ck) || { kind: r.kind, category_id: r.category_id, name: r.category_name || 'ללא קטגוריה', amount: 0, count: 0 };
@@ -239,5 +253,33 @@ export async function summary(env, from, to) {
     from, to, income: total.income, expense: total.expense, net: total.income - total.expense, count: rows.length,
     categories: [...byCat.values()].sort((a, b) => b.amount - a.amount),
     owners: [...byOwner.values()],
+    payments: [...byPay.values()].sort((a, b) => b.amount - a.amount),
+    days: [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date)),
   };
+}
+
+/** The day tracking started (setting), else the day the first user was created. */
+export async function trackingStart(env) {
+  const s = await first(env, `SELECT value FROM sf_settings WHERE key = 'tracking_start'`);
+  if (s?.value) return s.value;
+  const u = await first(env, `SELECT MIN(created_at) AS t FROM sf_users`);
+  return u?.t ? todayIn(env.TZ || 'Asia/Jerusalem', new Date(u.t)) : todayFor(env);
+}
+
+/**
+ * Where the money went between from..to: income/expenses by category, payment and person, per day,
+ * plus balance corrections ("I have X now") = money that moved without being recorded.
+ */
+export async function report(env, from, to) {
+  const sum = await summary(env, from, to);
+  const adjust = await all(
+    env,
+    `SELECT m.account_id, a.name AS account_name, a.kind AS account_kind, SUM(m.amount) AS amount, COUNT(*) AS count
+     FROM sf_account_moves m JOIN sf_accounts a ON a.id = m.account_id
+     WHERE m.kind = 'adjust' AND m.date BETWEEN ? AND ? GROUP BY m.account_id ORDER BY a.sort, a.id`,
+    from, to
+  );
+  const unrecorded = adjust.reduce((s, a) => s + a.amount, 0);
+  const days = Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1);
+  return { ...sum, unrecorded, adjustments: adjust, days, per_day: Math.round(sum.expense / days) };
 }

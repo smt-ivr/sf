@@ -210,7 +210,7 @@ test('cash wallet, balance correction, transfer, and money held for others', asy
   assert.equal(bal.find((a) => a.id === acc.id).balance, 100000);
 
   // 600 of Reuven's money is already inside the bank balance
-  const h = await app.call('POST', '/held', { name: 'ראובן', amount: 600, in_balance: true });
+  const h = await app.call('POST', '/held', { name: 'ראובן', amount: 600, in_balance: true, account_id: acc.id });
   assert.equal(h.status, 201);
   let dash = (await app.call('GET', '/dashboard')).data;
   assert.equal(dash.held.total, 60000);
@@ -233,4 +233,37 @@ test('recurring by the Hebrew calendar is validated', async () => {
   assert.equal(ok.data.calendar, 'hebrew');
   const fc = (await app.call('GET', '/forecast?days=60')).data;
   assert.ok(fc.events.some((e) => e.recurring_id === ok.data.id));
+});
+
+test('report: from the tracking start, by category and payment, with unrecorded differences', async () => {
+  const { app, acc, regular, food } = await ready();
+  const today = todayFor(app.env);
+  assert.equal((await app.call('GET', '/settings')).data.tracking_start, today);
+  await app.call('POST', '/transactions', { kind: 'expense', amount: 100, date: today, card_id: regular.id, category_id: food.id });
+  await app.call('POST', '/transactions', { kind: 'income', amount: 500, date: today, account_id: acc.id });
+  await app.call('POST', '/transactions', { kind: 'expense', amount: 999, date: '2020-01-05', account_id: acc.id }); // before the start
+  await app.call('POST', `/accounts/${acc.id}/balance`, { balance: 351 }); // 1000 + 500 - 999 = 501 computed (card not charged yet) -> 150 unrecorded
+  const r = (await app.call('GET', '/report')).data;
+  assert.equal(r.from, today);
+  assert.equal(r.income, 50000);
+  assert.equal(r.expense, 10000);
+  assert.equal(r.categories.find((c) => c.category_id === food.id).amount, 10000);
+  assert.equal(r.payments.find((p) => p.card_id === regular.id).amount, 10000);
+  assert.equal(r.unrecorded, -15000);
+  assert.equal((await app.call('PATCH', '/settings', { tracking_start: '2020-01-01' })).data.tracking_start, '2020-01-01');
+  assert.equal((await app.call('GET', '/report')).data.expense, 109900);
+  assert.equal((await app.call('GET', '/dashboard')).data.since.tracking_start, '2020-01-01');
+});
+
+test('money held for others belongs to an account: what is missing there', async () => {
+  const { app, acc } = await ready();
+  assert.equal((await app.call('POST', '/held', { name: 'שמעון', amount: 1500, in_balance: true })).status, 422);
+  const h = await app.call('POST', '/held', { name: 'שמעון', amount: 1500, in_balance: true, account_id: acc.id });
+  assert.equal(h.status, 201);
+  const held = (await app.call('GET', '/dashboard')).data.held;
+  assert.equal(held.by_account[acc.id], 150000);
+  assert.equal(held.funds[0].account_name, 'עו"ש');
+  // the account has 1000: 500 of his money was used
+  const bal = (await app.call('GET', '/dashboard')).data.accounts.find((a) => a.id === acc.id).balance;
+  assert.equal(bal - held.by_account[acc.id], -50000);
 });

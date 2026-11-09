@@ -24,7 +24,19 @@ export function Home({ version, lookups, openEntry, refresh }) {
     </div>`;
   }
 
+  const since = data.since;
   return html`
+    <a class="card since" href="#/report">
+      <div class="month-head"><h3>מאז שהתחלנו לרשום</h3><span class="muted small">${shortDate(since.tracking_start)} · ${hebDate(since.tracking_start)}</span></div>
+      <div class="kpis">
+        <div><span class="muted small">נכנס</span><b class="income">${money(since.income)}</b></div>
+        <div><span class="muted small">יצא</span><b class="expense">${money(since.expense)}</b></div>
+        <div><span class="muted small">${since.net < 0 ? 'חסר' : 'נשאר'}</span><b class=${since.net < 0 ? 'expense' : 'income'}>${money(since.net)}</b></div>
+      </div>
+      ${since.unrecorded < 0 && html`<p class="small expense">⚠ ${money(-since.unrecorded)} יצאו בלי רישום (לפי עדכוני יתרה)</p>`}
+      <span class="link small">לאן הלך כל שקל ›</span>
+    </a>
+
     <section class="card month">
       <div class="month-head"><h2>${monthName(data.today.slice(0, 7))} <span class="muted small">${hebDate(data.today)}</span></h2><a class="link small" href="#/tx">לכל התנועות</a></div>
       <div class="kpis">
@@ -48,7 +60,15 @@ export function Home({ version, lookups, openEntry, refresh }) {
 
     <section class="card">
       <div class="month-head"><h3>יתרות</h3><b class=${total < 0 ? 'expense' : ''}>${money(total)}</b></div>
-      ${active.map((a) => html`<button class="list-row tx" onClick=${() => setAccount(a)}><span>${accIcon(a)} ${a.name} <span class="muted small">${a.kind === 'cash' ? 'לחצו לעדכון' : a.bank}</span></span><b class=${a.balance < 0 ? 'expense' : ''}>${money(a.balance)}</b></button>`)}
+      ${active.map((a) => {
+        const others = data.held.by_account[a.id] || 0;
+        const mine = a.balance - others;
+        return html`<button class="list-row tx" onClick=${() => setAccount(a)}>
+          <span>${accIcon(a)} ${a.name} <span class="muted small">${a.kind === 'cash' ? 'לחצו לעדכון' : a.bank}</span>
+            ${others !== 0 && html`<span class="small">מתוך זה ${money(others)} של אחרים · ${mine < 0 ? html`<b class="expense">חסר ${money(-mine)} להחזיר לכאן</b>` : html`שלך ${money(mine)}`}</span>`}</span>
+          <b class=${a.balance < 0 ? 'expense' : ''}>${money(a.balance)}</b>
+        </button>`;
+      })}
       ${data.held.total !== 0 && html`<div class="list-row held-row"><span>מתוך זה של אחרים</span><b>${money(-data.held.total)}</b></div>
         <div class="list-row"><b>שלך באמת</b><b class=${total - data.held.total < 0 ? 'expense' : 'income'}>${money(total - data.held.total)}</b></div>
         ${total - data.held.total < 0 && html`<p class="small expense">השתמשת ב-${money(data.held.total - total)} מכסף של אחרים.</p>`}`}

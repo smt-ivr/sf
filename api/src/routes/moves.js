@@ -97,9 +97,9 @@ export async function listHeld({ env }) {
 }
 
 /**
- * POST /held { name, note?, amount, account_id?, in_balance, date? }
- * in_balance = the money is already part of the balance I entered (nothing changes in the account);
- * otherwise it comes in now, into account_id.
+ * POST /held { name, note?, amount, account_id, in_balance, date? }
+ * account_id = the account where the money is kept. in_balance = it is already part of that account's
+ * balance (nothing changes); otherwise it comes in now.
  */
 export async function createHeld({ env, request, actor }) {
   const body = await readJson(request);
@@ -111,9 +111,9 @@ export async function createHeld({ env, request, actor }) {
     .bool('in_balance', { default: true })
     .date('date')
     .done();
-  if (!d.in_balance && !d.account_id) throw invalid({ account_id: 'לאיזה חשבון נכנס הכסף?' });
-  if (d.account_id) await requireAccount(env, d.account_id);
-  const res = await run(env, `INSERT INTO sf_held_funds (name, note) VALUES (?, ?)`, d.name, d.note);
+  if (!d.account_id) throw invalid({ account_id: 'באיזה חשבון הכסף נמצא?' });
+  await requireAccount(env, d.account_id);
+  const res = await run(env, `INSERT INTO sf_held_funds (name, note, account_id) VALUES (?, ?, ?)`, d.name, d.note, d.account_id);
   const fid = res.meta.last_row_id;
   if (d.amount) {
     await insertMove(env, {
@@ -126,7 +126,8 @@ export async function createHeld({ env, request, actor }) {
 
 export async function patchHeld({ env, request, params }) {
   const fid = id(params.id);
-  const d = fields(await readJson(request), { partial: true }).str('name', { required: true, max: 80 }).str('note', { max: 300 }).bool('is_active').done();
+  const d = fields(await readJson(request), { partial: true }).str('name', { required: true, max: 80 }).str('note', { max: 300 }).int('account_id', { min: 1 }).bool('is_active').done();
+  if (d.account_id) await requireAccount(env, d.account_id);
   const sets = Object.keys(d);
   if (sets.length) {
     await run(env, `UPDATE sf_held_funds SET ${sets.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...sets.map((k) => (typeof d[k] === 'boolean' ? (d[k] ? 1 : 0) : d[k])), fid);

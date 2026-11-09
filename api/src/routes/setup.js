@@ -2,7 +2,7 @@
 import { randomToken } from '../auth.js';
 import { all, first, run, setClause } from '../db.js';
 import { badRequest, conflict, invalid, json, noContent, notFound, readJson } from '../http.js';
-import { checkCategory, resolvePayment, todayFor } from '../money.js';
+import { checkCategory, resolvePayment, todayFor, trackingStart } from '../money.js';
 import { getSettings, setSetting } from '../settings.js';
 import { fields, id } from '../validate.js';
 
@@ -255,6 +255,7 @@ export async function getAppSettings({ env, url }) {
   return json({
     google_client_id: s.google_client_id,
     google_login_enabled: s.google_login_enabled === '1',
+    tracking_start: await trackingStart(env),
     ivr_enabled: s.ivr_enabled === '1',
     ivr_link: s.ivr_key ? `${url.origin}${base}/api/ivr?key=${s.ivr_key}` : null,
   });
@@ -265,6 +266,7 @@ export async function patchAppSettings(ctx) {
     .str('google_client_id', { max: 200 })
     .bool('google_login_enabled')
     .bool('ivr_enabled')
+    .date('tracking_start')
     .done();
   for (const [k, v] of Object.entries(d)) await setSetting(ctx.env, k, typeof v === 'boolean' ? (v ? '1' : '0') : v);
   return getAppSettings(ctx);
