@@ -12,7 +12,8 @@ export function AccountModal({ account, lookups, onClose, onDone, tab: tab0 = 'b
   const bal = useForm({ balance: toInput(account.balance), date: lookups.today });
   const tr = useForm({
     dir: transfer ? 'in' : account.kind === 'cash' ? 'in' : 'out',
-    other: transfer?.from ?? (account.kind === 'cash' ? others.find((a) => a.kind === 'bank') : cash)?.id ?? others[0]?.id ?? '',
+    // from a task: the suggested account, or nothing (the user chooses); otherwise a sensible default
+    other: transfer ? transfer.from ?? '' : (account.kind === 'cash' ? others.find((a) => a.kind === 'bank') : cash)?.id ?? others[0]?.id ?? '',
     amount: transfer ? toInput(transfer.amount) : '', date: lookups.today, note: '',
   });
 
@@ -50,7 +51,12 @@ export function AccountModal({ account, lookups, onClose, onDone, tab: tab0 = 'b
       ${!others.length ? html`<p class="muted">אין חשבון נוסף להעביר אליו.</p>` : html`
         <${Segments} value=${tr.values.dir} onChange=${tr.set('dir')} options=${[{ value: 'out', label: `מ${account.name} אל…` }, { value: 'in', label: `אל ${account.name} מ…` }]} />
         <div class="row2">
-          <${Field} label=${tr.values.dir === 'out' ? 'אל' : 'מ'}><select value=${tr.values.other} onChange=${tr.set('other')}>${others.map((a) => html`<option value=${a.id}>${accIcon(a)} ${a.name}</option>`)}</select><//>
+          <${Field} label=${tr.values.dir === 'out' ? 'אל' : 'מ'} hint=${transfer && !transfer.from ? 'אין חשבון שיכול לתת את כל הסכום בלי להיכנס למינוס' : ''}>
+            <select value=${tr.values.other} onChange=${tr.set('other')} required>
+              <option value="" disabled>בחרו חשבון</option>
+              ${others.map((a) => html`<option value=${a.id}>${accIcon(a)} ${a.name}</option>`)}
+            </select>
+          <//>
           <${Field} label="סכום (₪)" error=${tr.errors.amount}><input inputmode="decimal" value=${tr.values.amount} onInput=${tr.set('amount')} required /><//>
         </div>
         <div class="row2">

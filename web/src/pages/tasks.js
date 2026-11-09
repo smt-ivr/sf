@@ -6,18 +6,31 @@ import { confirmBox, ErrorBox, Field, html, Loading, Modal, money, shortDate, to
 import { AccountModal, ConfirmModal, HeldModal } from './money.js';
 
 const LEVEL = { urgent: 'דחוף', soon: 'בקרוב', info: 'לידיעה' };
-const ICON = { confirm: '✍', shortfall: '🏦', owed: '🤝', cash: '💵', expected: '📥', manual: '📝' };
-const BUTTON = { confirm: 'לעדכן', shortfall: 'העברתי', owed: 'פירוט', cash: 'לספור', expected: 'נכנס', manual: 'בוצע' };
+const ICON = { confirm: '✍', shortfall: '🏦', depends: '⏳', charge: '📅', owed: '🤝', cash: '💵', expected: '📥', manual: '📝' };
+const BUTTON = { confirm: 'לעדכן', shortfall: 'העברתי', depends: 'העברתי', owed: 'העברתי', cash: 'לספור', expected: 'נכנס', manual: 'בוצע' };
 
-/** The status banner: everything under control, or how many things need attention. */
+/** Overdraft outlook for the banks: none / only if income comes in / expected. */
+function MinusLine({ minus }) {
+  if (!minus) return null;
+  if (minus.expected.length) {
+    return html`<div class="minus bad">⚠ צפוי מינוס: ${minus.expected.map((m) => `${m.name} ב-${shortDate(m.date)} (${money(m.amount)})`).join(', ')}</div>`;
+  }
+  if (minus.depends.length) {
+    const on = [...new Set(minus.depends.flatMap((m) => m.on))].join(', ');
+    return html`<div class="minus warn">לא צפוי מינוס, בתנאי ש${on || 'ההכנסה הצפויה'} ייכנס בזמן. אחרת: ${minus.depends.map((m) => `${m.name} ב-${shortDate(m.date)}`).join(', ')}</div>`;
+  }
+  return html`<div class="minus good">✓ לא צפוי מינוס באף בנק ב-${minus.days} הימים הקרובים</div>`;
+}
+
+/** The status banner: everything fine (no overdraft ahead), or how many things need attention. */
 export function StatusBanner({ tasks, compact }) {
   const n = tasks.urgent + tasks.soon;
   if (tasks.status === 'ok') {
-    return html`<div class="status ok"><span class="status-icon">✓</span><div><b>הכל בשליטה</b>${!compact && html`<div class="small">אין חשבון שעומד להיכנס למינוס ואין מה לאשר כרגע</div>`}</div></div>`;
+    return html`<div class="status ok"><span class="status-icon">✓</span><div><b>הכל בסדר</b><${MinusLine} minus=${tasks.minus} /></div></div>`;
   }
   return html`<div class=${`status ${tasks.status}`}><span class="status-icon">!</span><div>
     <b>${n === 1 ? 'יש דבר אחד לטפל בו' : `יש ${n} דברים לטפל בהם`}</b>
-    <div class="small">${[tasks.urgent && `${tasks.urgent} דחופים`, tasks.soon && `${tasks.soon} בקרוב`].filter(Boolean).join(' · ')}</div>
+    <${MinusLine} minus=${tasks.minus} />
   </div></div>`;
 }
 
@@ -30,7 +43,9 @@ export function TaskItem({ task, onAction }) {
     </div>
     <div class="task-side">
       ${task.due && html`<span class="date-pill">${shortDate(task.due)}</span>`}
-      <button class=${`btn small ${task.level === 'urgent' ? 'primary' : ''}`} onClick=${() => onAction(task)}>${BUTTON[task.kind]}</button>
+      ${BUTTON[task.kind] && html`<button class=${`btn small ${task.level === 'urgent' ? 'primary' : ''}`} onClick=${() => onAction(task)}>${BUTTON[task.kind]}</button>`}
+      ${task.kind === 'charge' && task.level !== 'info' && html`<button class="btn small" onClick=${() => onAction(task)}>העברתי</button>`}
+      ${task.more && html`<button class="link small" onClick=${() => onAction({ ...task, action: task.more })}>פירוט</button>`}
     </div>
   </div>`;
 }
@@ -76,7 +91,7 @@ export function Tasks({ version, lookups, refresh }) {
       ${g.items.map((t) => html`<${TaskItem} task=${t} onAction=${run} />`)}
     </section>`)}
     <button class="btn primary block" onClick=${() => setAdding(true)}>+ משימה שלי</button>
-    <p class="muted small">משימות אוטומטיות נוצרות מהנתונים: סכום שצריך לאשר כמה נכנס בפועל, חשבון שעומד להיכנס למינוס, כסף של אחרים שהשתמשת בו, ומזומן שלא נספר שבוע. הן נעלמות לבד כשמטפלים בהן.</p>
+    <p class="muted small">משימות אוטומטיות נוצרות מהנתונים: חיוב שיורד השבוע (לוודא שיש כסף), חשבון שעומד להיכנס למינוס או שיש בו מספיק רק אם משכורת תיכנס, כסף של אחרים שהשתמשת בו, סכום שצריך לאשר כמה נכנס בפועל, ומזומן שלא נספר שבוע. "העברתי" רושם העברה מבנק לבנק. המשימות נעלמות לבד כשמטפלים בהן.</p>
     ${data.done.length > 0 && html`<section class="card">
       <h3>בוצעו</h3>
       ${data.done.map((t) => html`<div class="list-row small done-row">

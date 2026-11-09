@@ -239,6 +239,18 @@ export async function forecast(env, to, today = todayFor(env)) {
       if (bal < low.balance) low = { balance: bal, date: e.date };
       if (bal < 0 && !shortBy) shortBy = { date: e.date, name: e.name };
     }
+    // the same, if income that was not confirmed yet (a salary still expected) does not come in
+    const unsure = (e) => e.amount > 0 && (e.type === 'recurring' || e.type === 'pending');
+    let sbal = a.balance;
+    let slow = { balance: sbal, date: today };
+    let sshort = null;
+    const waitingFor = [];
+    for (const e of evs) {
+      if (unsure(e)) { waitingFor.push({ name: e.name, date: e.date, amount: e.amount, recurring_id: e.recurring_id, occurrence: e.occurrence }); continue; }
+      sbal += e.amount;
+      if (sbal < slow.balance) slow = { balance: sbal, date: e.date };
+      if (sbal < 0 && !sshort) sshort = { date: e.date, name: e.name };
+    }
     const others = held.by_account[a.id] || 0;
     return {
       account_id: a.id, name: a.name, kind: a.kind, balance: a.balance, others, mine: a.balance - others,
@@ -247,6 +259,8 @@ export async function forecast(env, to, today = todayFor(env)) {
       end_balance: bal, lowest: low,
       need: low.balance < 0 ? -low.balance : 0, // must be added before shortBy.date
       short_by: shortBy, events: evs,
+      // without income that is still only expected
+      need_sure: slow.balance < 0 ? -slow.balance : 0, short_by_sure: sshort, waiting_for: waitingFor,
     };
   });
   return { today, to, start_balance: start, end_balance: running, lowest, accounts: accs, events, per_account: perAccount };

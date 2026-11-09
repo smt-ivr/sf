@@ -335,3 +335,37 @@ test('tasks: confirm a salary, money needed in an account, money to return, own 
   assert.equal(after.done.length, 1);
   assert.ok((await app.call('GET', '/dashboard')).data.tasks.tasks.length > 0);
 });
+
+test('tasks: charges this week, "no overdraft only if the salary comes in", returning others\' money by transfer', async () => {
+  const { app, acc } = await ready();
+  const today = todayFor(app.env);
+  await app.call('PATCH', `/accounts/${acc.id}`, { opening_date: today, opening_balance: 100 });
+  const other = (await app.call('POST', '/accounts', { name: 'פועלים', opening_balance: 5000, opening_date: today })).data;
+  const in1 = addDays(today, 1);
+  const in3 = addDays(today, 3);
+  await app.call('POST', '/recurring', { kind: 'income', name: 'משכורת', amount: 3000, account_id: acc.id, day_of_month: Number(in1.slice(8, 10)), start_date: in1, auto: false });
+  await app.call('POST', '/recurring', { kind: 'expense', name: 'הלוואה', amount: 1500, account_id: acc.id, day_of_month: Number(in3.slice(8, 10)), start_date: in3 });
+  await app.call('POST', '/recurring', { kind: 'expense', name: 'ועד בית', amount: 400, account_id: other.id, day_of_month: Number(in3.slice(8, 10)), start_date: in3 });
+  let t = (await app.call('GET', '/tasks')).data;
+  const dep = t.tasks.find((x) => x.kind === 'depends');
+  assert.ok(dep, 'enough only if the salary comes in');
+  assert.equal(dep.amount, 140000);
+  assert.equal(dep.action.type, 'transfer');
+  assert.equal(dep.action.from, other.id); // פועלים can give it
+  assert.equal(t.minus.expected.length, 0);
+  assert.equal(t.minus.depends[0].name, 'עו"ש');
+  assert.deepEqual(t.minus.depends[0].on, ['משכורת']);
+  assert.ok(!t.tasks.some((x) => x.kind === 'charge' && x.action.to === acc.id), 'one task per account');
+  const charge = t.tasks.find((x) => x.kind === 'charge' && x.action.to === other.id);
+  assert.ok(charge, 'make sure 400 is in פועלים');
+  assert.equal(charge.level, 'info');
+  assert.match(charge.detail, /יישאר/);
+
+  // others' money used in פועלים: the task is a transfer back into it
+  await app.call('POST', '/held', { name: 'נחמן', amount: 6000, in_balance: true, account_id: other.id });
+  t = (await app.call('GET', '/tasks')).data;
+  const owed = t.tasks.find((x) => x.kind === 'owed');
+  assert.equal(owed.action.type, 'transfer');
+  assert.equal(owed.action.to, other.id);
+  assert.equal(owed.amount, 100000);
+});

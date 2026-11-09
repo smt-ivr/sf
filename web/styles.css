@@ -234,3 +234,7 @@ input:focus, select:focus { outline: 2px solid var(--brand); outline-offset: -1p
 .acc-name { font-weight: 600; }
 .acc-row { border-radius: 10px; }
 .acc-row.short { padding-inline: 8px; }
+.minus { font-size: 13px; margin-top: 2px; }
+.minus.good { color: var(--income); }
+.minus.warn { color: #b07a00; }
+.minus.bad { color: var(--expense); font-weight: 600; }
