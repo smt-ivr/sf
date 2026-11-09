@@ -46,7 +46,7 @@ export function Report({ version, lookups, openEntry }) {
         <div><span class="muted small">${data.net < 0 ? 'חסר' : 'נשאר'}</span><b class=${data.net < 0 ? 'expense' : 'income'}>${money(data.net)}</b></div>
       </div>
       <p class="muted small">בממוצע ${money(data.per_day)} הוצאות ליום · ${data.count} תנועות</p>
-      ${period === 'start' && html`<p class="hint">תאריך תחילת המעקב נקבע בהגדרות.</p>`}
+      ${period === 'start' && html`<p class="hint">מהיום שהזנת את היתרות הראשונות.</p>`}
     </section>
 
     ${data.unrecorded !== 0 && html`<section class="card attention">

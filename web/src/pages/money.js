@@ -27,8 +27,14 @@ export function AccountModal({ account, lookups, onClose, onDone }) {
     tr.submit(() => api.post('/transfers', body)).then((r) => r && (toast('נשמר'), onDone()));
   };
 
+  const pa = account.forecast;
   return html`<${Modal} title=${`${accIcon(account)} ${account.name}`} onClose=${onClose}>
     <p class="muted">יתרה לפי המערכת: <b>${money(account.balance)}</b></p>
+    ${pa && pa.events.length > 0 && html`<div class="card held">
+      <b class="small">צפוי בחשבון הזה (30 יום)</b>
+      ${pa.events.map((e) => html`<div class="list-row small"><span>${shortDate(e.date)} · ${e.name}${e.type === 'pending' ? ' (ממתין לאישור)' : ''}</span>
+        <span class="end"><b class=${e.amount < 0 ? 'expense' : 'income'}>${money(e.amount)}</b><span class=${e.account_balance_after < 0 ? 'expense' : 'muted'}>${money(e.account_balance_after)}</span></span></div>`)}
+    </div>`}
     <${Segments} value=${tab} onChange=${setTab} options=${[{ value: 'balance', label: 'עדכון יתרה' }, { value: 'transfer', label: account.kind === 'cash' ? 'משיכה / הפקדה' : 'העברה' }]} />
     ${tab === 'balance' && html`<form onSubmit=${saveBalance}>
       <p class="hint">${account.kind === 'cash' ? 'ספרו כמה מזומן יש לכם עכשיו.' : 'כמה יש בחשבון לפי הבנק.'} ההפרש נרשם כ"עדכון יתרה" (לא כהכנסה או הוצאה).</p>

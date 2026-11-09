@@ -3,7 +3,7 @@ import { all, first, nowIso, run, setClause } from '../db.js';
 import { badRequest, json, noContent, notFound, readJson } from '../http.js';
 import { addDays, chargeDate, monthRange, shiftMonth } from '../dates.js';
 import { movesBetween } from './moves.js';
-import { report, trackingStart } from '../money.js';
+import { report, trackingStart, trackingStartAt } from '../money.js';
 import { balances, heldFunds, checkCategory, forecast, insertTransaction, pendingRecurring, resolvePayment, summary, syncRecurring, todayFor } from '../money.js';
 import { fields, id, isDate } from '../validate.js';
 
@@ -144,7 +144,7 @@ export async function dashboard({ env }) {
     forecast(env, addDays(today, 30), today),
     all(env, `${SELECT_TX} ORDER BY t.created_at DESC, t.id DESC LIMIT 8`),
     heldFunds(env),
-    report(env, start, today),
+    report(env, start, today, await trackingStartAt(env)),
   ]);
   return json({ today, month: now, previous_month: before, accounts, pending, forecast: fc, recent, held, since: { ...since, tracking_start: start } });
 }
@@ -164,10 +164,11 @@ export async function getReport({ env, url }) {
   await syncRecurring(env);
   const start = await trackingStart(env);
   const today = todayFor(env);
+  const sinceStart = !url.searchParams.get('from');
   const from = url.searchParams.get('from') || start;
   const to = url.searchParams.get('to') || today;
   if (!isDate(from) || !isDate(to) || from > to) throw badRequest('טווח תאריכים לא תקין');
-  return json({ ...(await report(env, from, to)), tracking_start: start, today });
+  return json({ ...(await report(env, from, to, sinceStart ? await trackingStartAt(env) : null)), tracking_start: start, today });
 }
 
 /** GET /summary?month=YYYY-MM */

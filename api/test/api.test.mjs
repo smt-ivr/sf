@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import worker from '../src/index.js';
-import { chargeDate, occurrences } from '../src/dates.js';
+import { addDays, chargeDate, occurrences } from '../src/dates.js';
 import { todayFor } from '../src/money.js';
 import { D1Shim } from './d1-shim.mjs';
 
@@ -235,24 +235,53 @@ test('recurring by the Hebrew calendar is validated', async () => {
   assert.ok(fc.events.some((e) => e.recurring_id === ok.data.id));
 });
 
-test('report: from the tracking start, by category and payment, with unrecorded differences', async () => {
+test('report: from the first balance entered, by category and payment, with unrecorded differences', async () => {
   const { app, acc, regular, food } = await ready();
   const today = todayFor(app.env);
-  assert.equal((await app.call('GET', '/settings')).data.tracking_start, today);
+  await app.call('PATCH', `/accounts/${acc.id}`, { opening_date: today, opening_balance: 1000 });
   await app.call('POST', '/transactions', { kind: 'expense', amount: 100, date: today, card_id: regular.id, category_id: food.id });
   await app.call('POST', '/transactions', { kind: 'income', amount: 500, date: today, account_id: acc.id });
-  await app.call('POST', '/transactions', { kind: 'expense', amount: 999, date: '2020-01-05', account_id: acc.id }); // before the start
+  await app.call('POST', '/transactions', { kind: 'expense', amount: 999, date: '2020-01-05', account_id: acc.id }); // recorded now, dated long ago
+  // the wallet's opening date is today too, so tracking starts today
   await app.call('POST', `/accounts/${acc.id}/balance`, { balance: 351 }); // 1000 + 500 - 999 = 501 computed (card not charged yet) -> 150 unrecorded
   const r = (await app.call('GET', '/report')).data;
+  assert.equal(r.tracking_start, today);
   assert.equal(r.from, today);
   assert.equal(r.income, 50000);
-  assert.equal(r.expense, 10000);
+  assert.equal(r.expense, 109900); // the 999 dated 2020 was recorded after the start: it counts
+  assert.equal((await app.call('GET', `/report?from=${today}&to=${today}`)).data.expense, 10000); // a date range: by date only
   assert.equal(r.categories.find((c) => c.category_id === food.id).amount, 10000);
   assert.equal(r.payments.find((p) => p.card_id === regular.id).amount, 10000);
   assert.equal(r.unrecorded, -15000);
-  assert.equal((await app.call('PATCH', '/settings', { tracking_start: '2020-01-01' })).data.tracking_start, '2020-01-01');
-  assert.equal((await app.call('GET', '/report')).data.expense, 109900);
-  assert.equal((await app.call('GET', '/dashboard')).data.since.tracking_start, '2020-01-01');
+});
+
+test('an expense dated before the balance was entered, but recorded after it, lowers the balance', async () => {
+  const { app, acc, direct } = await ready();
+  const today = todayFor(app.env);
+  await app.call('PATCH', `/accounts/${acc.id}`, { opening_date: today, opening_balance: 3892.38 });
+  await app.call('POST', '/transactions', { kind: 'expense', amount: 400, date: '2020-01-06', card_id: direct.id });
+  const a = (await app.call('GET', '/dashboard')).data.accounts.find((x) => x.id === acc.id);
+  assert.equal(a.balance, 349238);
+  // someone's money that came in last month is already inside the balance entered
+  await app.call('POST', '/held', { name: 'נחמן', amount: 4000, in_balance: false, account_id: acc.id, date: '2020-01-04' });
+  const d = (await app.call('GET', '/dashboard')).data;
+  assert.equal(d.accounts.find((x) => x.id === acc.id).balance, 349238);
+  assert.equal(d.forecast.per_account.find((x) => x.account_id === acc.id).mine, 349238 - 400000);
+  // and it is part of "since we started recording"
+  assert.equal((await app.call('GET', '/report')).data.expense >= 40000, true);
+});
+
+test('per account forecast: what goes out and how much must be added by when', async () => {
+  const { app, acc } = await ready();
+  const today = todayFor(app.env);
+  await app.call('PATCH', `/accounts/${acc.id}`, { opening_date: today, opening_balance: 100 });
+  const d = addDays(today, 3);
+  await app.call('POST', '/recurring', { kind: 'expense', name: 'הלוואה', amount: 1500, account_id: acc.id, day_of_month: Number(d.slice(8, 10)), start_date: d });
+  const pa = (await app.call('GET', '/forecast?days=10')).data.per_account.find((x) => x.account_id === acc.id);
+  assert.equal(pa.balance, 10000);
+  assert.equal(pa.out, 150000);
+  assert.equal(pa.need, 140000);
+  assert.equal(pa.short_by.date, d);
 });
 
 test('money held for others belongs to an account: what is missing there', async () => {

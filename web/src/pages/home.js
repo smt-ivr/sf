@@ -59,14 +59,15 @@ export function Home({ version, lookups, openEntry, refresh }) {
     </section>`}
 
     <section class="card">
-      <div class="month-head"><h3>יתרות</h3><b class=${total < 0 ? 'expense' : ''}>${money(total)}</b></div>
-      ${active.map((a) => {
-        const others = data.held.by_account[a.id] || 0;
-        const mine = a.balance - others;
-        return html`<button class="list-row tx" onClick=${() => setAccount(a)}>
-          <span>${accIcon(a)} ${a.name} <span class="muted small">${a.kind === 'cash' ? 'לחצו לעדכון' : a.bank}</span>
-            ${others !== 0 && html`<span class="small">מתוך זה ${money(others)} של אחרים · ${mine < 0 ? html`<b class="expense">חסר ${money(-mine)} להחזיר לכאן</b>` : html`שלך ${money(mine)}`}</span>`}</span>
-          <b class=${a.balance < 0 ? 'expense' : ''}>${money(a.balance)}</b>
+      <div class="month-head"><h3>כמה יש בכל חשבון</h3><b class=${total < 0 ? 'expense' : ''}>${money(total)}</b></div>
+      <p class="muted small">ומה צפוי לצאת ולהיכנס בכל אחד ב-30 הימים הקרובים</p>
+      ${fc.per_account.map((pa) => {
+        const a = active.find((x) => x.id === pa.account_id);
+        return html`<button class=${`acc-row ${pa.need ? 'short' : ''}`} onClick=${() => setAccount({ ...a, forecast: pa })}>
+          <div class="acc-top"><b>${accIcon(pa)} ${pa.name}</b><b class=${pa.balance < 0 ? 'expense' : ''}>${money(pa.balance)}</b></div>
+          ${pa.others !== 0 && html`<div class="small">מתוך זה ${money(pa.others)} של אחרים · ${pa.mine < 0 ? html`<b class="expense">חסר ${money(-pa.mine)} להחזיר לכאן</b>` : html`שלך ${money(pa.mine)}`}</div>`}
+          ${(pa.out || pa.in) ? html`<div class="small muted">${pa.out ? `יוצא ${money(pa.out)}` : ''}${pa.out && pa.in ? ' · ' : ''}${pa.in ? `נכנס ${money(pa.in)}` : ''} · צפוי ${money(pa.end_balance)}</div>` : ''}
+          ${pa.need > 0 && html`<div class="small expense"><b>⚠ צריך להכניס לכאן ${money(pa.need)} עד ${shortDate(pa.short_by.date)}</b> (${pa.short_by.name})</div>`}
         </button>`;
       })}
       ${data.held.total !== 0 && html`<div class="list-row held-row"><span>מתוך זה של אחרים</span><b>${money(-data.held.total)}</b></div>

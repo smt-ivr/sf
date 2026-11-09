@@ -121,16 +121,25 @@ export async function pendingRecurring(env, today = todayFor(env)) {
 }
 
 // ------------------------------------------------------------------ balances
-/** Balance of every account on `asOf`: opening balance + income/expenses charged + other moves. */
+/**
+ * Balance of every account on `asOf`: the balance entered + everything charged since.
+ * An entry counts when it was recorded after the balance was entered (whatever its date: a purchase
+ * from three days ago that is recorded now still lowers the balance), or when it hits the account after
+ * the opening date (e.g. a regular-card bill for a purchase recorded earlier).
+ * Transfers, corrections and held money dated before the opening date are already inside the
+ * balance entered (e.g. someone's money that came in last month), so they never count.
+ */
 export async function balances(env, asOf) {
   return all(
     env,
-    `SELECT a.id, a.name, a.bank, a.kind, a.owner_id, a.is_active,
+    `SELECT a.id, a.name, a.bank, a.kind, a.owner_id, a.is_active, a.opening_balance, a.opening_date,
        a.opening_balance
        + COALESCE((SELECT SUM(CASE WHEN t.kind = 'income' THEN t.amount ELSE -t.amount END) FROM sf_transactions t
-           WHERE t.account_id = a.id AND t.charge_date >= a.opening_date AND t.charge_date <= ?1), 0)
+           WHERE t.account_id = a.id AND t.charge_date <= ?1
+             AND (t.charge_date > a.opening_date OR t.created_at >= COALESCE(a.opening_at, a.opening_date || 'T00:00:00Z'))), 0)
        + COALESCE((SELECT SUM(m.amount) FROM sf_account_moves m
-           WHERE m.account_id = a.id AND m.date >= a.opening_date AND m.date <= ?1), 0) AS balance
+           WHERE m.account_id = a.id AND m.date <= ?1
+             AND (m.date > a.opening_date OR (m.date = a.opening_date AND m.created_at >= COALESCE(a.opening_at, a.opening_date || 'T00:00:00Z')))), 0) AS balance
      FROM sf_accounts a ORDER BY a.is_active DESC, a.kind, a.sort, a.id`,
     asOf
   );
@@ -213,16 +222,46 @@ export async function forecast(env, to, today = todayFor(env)) {
   let running = start;
   for (const e of events) e.balance_after = running += e.amount;
   const lowest = events.reduce((m, e) => (e.balance_after < m.balance ? { balance: e.balance_after, date: e.date } : m), { balance: start, date: today });
-  return { today, to, start_balance: start, end_balance: running, lowest, accounts: accs, events };
+
+  // per account: what goes out / comes in, the lowest point, and how much must be added there by when
+  const held = await heldFunds(env);
+  const perAccount = accs.filter((a) => a.is_active).map((a) => {
+    const evs = events.filter((e) => e.account_id === a.id);
+    let bal = a.balance;
+    let low = { balance: bal, date: today };
+    let shortBy = null; // first event that takes the account below zero
+    for (const e of evs) {
+      bal += e.amount;
+      e.account_balance_after = bal;
+      if (bal < low.balance) low = { balance: bal, date: e.date };
+      if (bal < 0 && !shortBy) shortBy = { date: e.date, name: e.name };
+    }
+    const others = held.by_account[a.id] || 0;
+    return {
+      account_id: a.id, name: a.name, kind: a.kind, balance: a.balance, others, mine: a.balance - others,
+      out: evs.filter((e) => e.amount < 0).reduce((s, e) => s - e.amount, 0),
+      in: evs.filter((e) => e.amount > 0).reduce((s, e) => s + e.amount, 0),
+      end_balance: bal, lowest: low,
+      need: low.balance < 0 ? -low.balance : 0, // must be added before shortBy.date
+      short_by: shortBy, events: evs,
+    };
+  });
+  return { today, to, start_balance: start, end_balance: running, lowest, accounts: accs, events, per_account: perAccount };
 }
 
 // ------------------------------------------------------------------ monthly summary
-export async function summary(env, from, to) {
+/**
+ * Income/expenses dated from..to. With `recordedSince` (an ISO time), entries recorded since then count
+ * too even when dated earlier: "since we started recording" includes an expense from three days before
+ * the start that was recorded after it.
+ */
+export async function summary(env, from, to, recordedSince = null) {
   const rows = await all(
     env,
     `SELECT t.kind, t.amount, t.date, t.category_id, t.owner_id, t.card_id, t.account_id, c.name AS category_name
-     FROM sf_transactions t LEFT JOIN sf_categories c ON c.id = t.category_id WHERE t.date BETWEEN ? AND ?`,
-    from, to
+     FROM sf_transactions t LEFT JOIN sf_categories c ON c.id = t.category_id
+     WHERE (t.date BETWEEN ?1 AND ?2) OR (?3 IS NOT NULL AND t.date < ?1 AND t.created_at >= ?3)`,
+    from, to, recordedSince
   );
   const total = { income: 0, expense: 0 };
   const byCat = new Map();
@@ -258,20 +297,24 @@ export async function summary(env, from, to) {
   };
 }
 
-/** The day tracking started (setting), else the day the first user was created. */
+/** Tracking started on the day the first balance was entered (the earliest opening date). */
 export async function trackingStart(env) {
-  const s = await first(env, `SELECT value FROM sf_settings WHERE key = 'tracking_start'`);
-  if (s?.value) return s.value;
-  const u = await first(env, `SELECT MIN(created_at) AS t FROM sf_users`);
-  return u?.t ? todayIn(env.TZ || 'Asia/Jerusalem', new Date(u.t)) : todayFor(env);
+  const r = await first(env, `SELECT MIN(opening_date) AS d FROM sf_accounts`);
+  return r?.d || todayFor(env);
+}
+
+/** When the first balance was entered (entries recorded from then on are "since we started"). */
+export async function trackingStartAt(env) {
+  const r = await first(env, `SELECT MIN(COALESCE(opening_at, opening_date || 'T00:00:00Z')) AS t FROM sf_accounts`);
+  return r?.t || null;
 }
 
 /**
  * Where the money went between from..to: income/expenses by category, payment and person, per day,
  * plus balance corrections ("I have X now") = money that moved without being recorded.
  */
-export async function report(env, from, to) {
-  const sum = await summary(env, from, to);
+export async function report(env, from, to, recordedSince = null) {
+  const sum = await summary(env, from, to, recordedSince);
   const adjust = await all(
     env,
     `SELECT m.account_id, a.name AS account_name, a.kind AS account_kind, SUM(m.amount) AS amount, COUNT(*) AS count
