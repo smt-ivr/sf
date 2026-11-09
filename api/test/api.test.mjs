@@ -298,3 +298,40 @@ test('money held for others belongs to an account: what is missing there', async
   const bal = (await app.call('GET', '/dashboard')).data.accounts.find((a) => a.id === acc.id).balance;
   assert.equal(bal - held.by_account[acc.id], -50000);
 });
+
+test('tasks: confirm a salary, money needed in an account, money to return, own tasks; "under control"', async () => {
+  const { app, acc } = await ready();
+  const today = todayFor(app.env);
+  await app.call('PATCH', `/accounts/${acc.id}`, { opening_date: today, opening_balance: 100 });
+  let t = (await app.call('GET', '/tasks')).data;
+  assert.equal(t.status, 'ok');
+
+  const soon = addDays(today, 3);
+  await app.call('POST', '/recurring', { kind: 'expense', name: 'הלוואה', amount: 500, account_id: acc.id, day_of_month: Number(soon.slice(8, 10)), start_date: soon });
+  const past = addDays(today, -1);
+  await app.call('POST', '/recurring', { kind: 'income', name: 'משכורת', amount: 3000, account_id: acc.id, day_of_month: Number(past.slice(8, 10)), start_date: past, auto: false });
+  await app.call('POST', '/held', { name: 'נחמן', amount: 300, in_balance: true, account_id: acc.id });
+  t = (await app.call('GET', '/tasks')).data;
+  const kinds = t.tasks.map((x) => x.kind);
+  assert.ok(kinds.includes('confirm'), 'confirm the salary');
+  assert.ok(kinds.includes('owed'), 'others money used');
+  // the overdue salary counts in the forecast (tomorrow), so the loan is covered: no shortfall
+  assert.ok(!kinds.includes('shortfall'));
+  const conf = t.tasks.find((x) => x.kind === 'confirm');
+  await app.call('POST', `/recurring/${conf.action.item.recurring_id}/skip`, { occurrence: conf.action.item.occurrence });
+  t = (await app.call('GET', '/tasks')).data;
+  const short = t.tasks.find((x) => x.kind === 'shortfall');
+  assert.ok(short, 'without the salary the loan is not covered');
+  assert.equal(short.amount, 40000);
+  assert.equal(short.level, 'urgent');
+  assert.equal(t.status, 'urgent');
+
+  const mine = await app.call('POST', '/tasks', { title: 'לשלם לאינסטלטור', due_date: addDays(today, 10) });
+  assert.equal(mine.status, 201);
+  assert.ok((await app.call('GET', '/tasks')).data.tasks.some((x) => x.kind === 'manual'));
+  await app.call('PATCH', `/tasks/${mine.data.id}`, { done: true });
+  const after = (await app.call('GET', '/tasks')).data;
+  assert.ok(!after.tasks.some((x) => x.kind === 'manual'));
+  assert.equal(after.done.length, 1);
+  assert.ok((await app.call('GET', '/dashboard')).data.tasks.tasks.length > 0);
+});

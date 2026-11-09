@@ -232,7 +232,7 @@ export async function forecast(env, to, today = todayFor(env)) {
     const evs = events.filter((e) => e.account_id === a.id);
     let bal = a.balance;
     let low = { balance: bal, date: today };
-    let shortBy = null; // first event that takes the account below zero
+    let shortBy = bal < 0 ? { date: today, name: 'היתרה כבר במינוס' } : null; // first moment the account is below zero
     for (const e of evs) {
       bal += e.amount;
       e.account_balance_after = bal;

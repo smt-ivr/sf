@@ -4,6 +4,7 @@ import { badRequest, json, noContent, notFound, readJson } from '../http.js';
 import { addDays, chargeDate, monthRange, shiftMonth } from '../dates.js';
 import { movesBetween } from './moves.js';
 import { report, trackingStart } from '../money.js';
+import { computeTasks } from '../tasks.js';
 import { balances, heldFunds, checkCategory, forecast, insertTransaction, pendingRecurring, resolvePayment, summary, syncRecurring, todayFor } from '../money.js';
 import { fields, id, isDate } from '../validate.js';
 
@@ -146,7 +147,8 @@ export async function dashboard({ env }) {
     heldFunds(env),
     report(env, start, today),
   ]);
-  return json({ today, month: now, previous_month: before, accounts, pending, forecast: fc, recent, held, since: { ...since, tracking_start: start } });
+  const tasks = await computeTasks(env, { today, fc, held, pending });
+  return json({ today, month: now, previous_month: before, accounts, pending, forecast: fc, recent, held, tasks, since: { ...since, tracking_start: start } });
 }
 
 /** GET /forecast?days=60 (or to=YYYY-MM-DD) */

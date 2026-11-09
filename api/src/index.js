@@ -8,6 +8,7 @@ import * as setup from './routes/setup.js';
 import * as tx from './routes/transactions.js';
 import * as users from './routes/users.js';
 import * as moves from './routes/moves.js';
+import * as tasks from './routes/tasks.js';
 
 const PUBLIC = { auth: 'none' };
 
@@ -63,6 +64,10 @@ export const router = new Router()
   .patch('/held/:id', moves.patchHeld)
   .delete('/held/:id', moves.deleteHeld)
   .post('/held/:id/moves', moves.addHeldMove)
+  .get('/tasks', tasks.list)
+  .post('/tasks', tasks.create)
+  .patch('/tasks/:id', tasks.patch)
+  .delete('/tasks/:id', tasks.remove)
   .get('/users', users.list)
   .post('/users', users.create)
   .patch('/users/:id', users.patch)

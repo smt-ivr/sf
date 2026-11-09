@@ -5,12 +5,16 @@ import { api } from '../api.js';
 import { accIcon, confirmBox, ErrorBox, Field, html, Loading, Modal, money, Segments, shortDate, toast, toInput, useApi, useForm } from '../ui.js';
 
 /** One account: update its real balance, or move money to/from another account. */
-export function AccountModal({ account, lookups, onClose, onDone }) {
-  const [tab, setTab] = useState('balance');
+export function AccountModal({ account, lookups, onClose, onDone, tab: tab0 = 'balance', transfer = null }) {
+  const [tab, setTab] = useState(tab0);
   const others = lookups.accounts.filter((a) => a.id !== account.id && a.is_active);
   const cash = others.find((a) => a.kind === 'cash');
   const bal = useForm({ balance: toInput(account.balance), date: lookups.today });
-  const tr = useForm({ dir: account.kind === 'cash' ? 'in' : 'out', other: (account.kind === 'cash' ? others.find((a) => a.kind === 'bank') : cash)?.id ?? others[0]?.id ?? '', amount: '', date: lookups.today, note: '' });
+  const tr = useForm({
+    dir: transfer ? 'in' : account.kind === 'cash' ? 'in' : 'out',
+    other: transfer?.from ?? (account.kind === 'cash' ? others.find((a) => a.kind === 'bank') : cash)?.id ?? others[0]?.id ?? '',
+    amount: transfer ? toInput(transfer.amount) : '', date: lookups.today, note: '',
+  });
 
   const saveBalance = (e) => {
     e.preventDefault();
@@ -142,4 +146,36 @@ function HeldMove({ fund, direction, lookups, onClose, onDone }) {
     </div>
     <button class="btn primary" disabled=${f.busy}>שמירה</button>
   </form><//>`;
+}
+
+/**
+ * "How much really came in?" for a recurring item (salary etc.): the expected amount is filled in,
+ * the user changes it to the real one. Works before the day too (it came in early).
+ */
+export function ConfirmModal({ item, lookups, onClose, onDone }) {
+  const f = useForm({ amount: toInput(item.amount), date: item.occurrence > lookups.today ? lookups.today : item.occurrence, note: '' });
+  const income = item.kind !== 'expense';
+  const ok = (e) => {
+    e.preventDefault();
+    f.submit(() => api.post(`/recurring/${item.recurring_id}/confirm`, { occurrence: item.occurrence, amount: f.values.amount, date: f.values.date, note: f.values.note || undefined }))
+      .then((r) => r && (toast(income ? 'נרשם שנכנס' : 'נרשם'), onDone()));
+  };
+  const skip = async () => {
+    if (!(await confirmBox(income ? 'הכסף לא נכנס הפעם (למשל לא שולם החודש)?' : 'זה לא ירד הפעם?', { ok: 'כן, לא היה' }))) return;
+    api.post(`/recurring/${item.recurring_id}/skip`, { occurrence: item.occurrence }).then(() => (toast('סומן שלא היה'), onDone()), (er) => toast(er.message, 'bad'));
+  };
+  const diff = Math.round(Number(String(f.values.amount).replace(',', '.')) * 100) - item.amount;
+  return html`<${Modal} title=${item.name} onClose=${onClose}>
+    <form onSubmit=${ok}>
+      <p class="muted">${income ? 'כמה נכנס בפועל?' : 'כמה יצא בפועל?'} הצפוי: <b>${money(item.amount)}</b> ב-${shortDate(item.occurrence)}</p>
+      <div class=${`amount-input ${income ? 'income' : 'expense'}`}><span>₪</span><input inputmode="decimal" value=${f.values.amount} onInput=${f.set('amount')} autofocus /></div>
+      ${f.errors.amount && html`<div class="err">${f.errors.amount}</div>`}
+      ${Number.isFinite(diff) && diff !== 0 && html`<p class=${`small ${diff < 0 ? 'expense' : 'income'}`}>${diff < 0 ? `פחות ב-${money(-diff)} מהצפוי` : `יותר ב-${money(diff)} מהצפוי`}</p>`}
+      <div class="row2">
+        <${Field} label=${income ? 'מתי נכנס' : 'מתי יצא'} error=${f.errors.date}><input type="date" value=${f.values.date} onInput=${f.set('date')} /><//>
+        <${Field} label="הערה"><input value=${f.values.note} onInput=${f.set('note')} placeholder="למשל: כולל בונוס" /><//>
+      </div>
+      <div class="actions"><button class="btn primary" disabled=${f.busy}>${income ? 'נכנס, לרשום' : 'יצא, לרשום'}</button><button type="button" class="btn" onClick=${skip}>לא היה הפעם</button></div>
+    </form>
+  <//>`;
 }
