@@ -2,7 +2,7 @@
 // whether everything is under control, each account's outlook, what comes next, this month.
 import { useState } from 'preact/hooks';
 import { accIcon, ErrorBox, hebDate, html, Loading, money, monthName, paymentName, shortDate, useApi } from '../ui.js';
-import { AccountModal, ConfirmModal, HeldModal } from './money.js';
+import { AccountModal, ConfirmModal, HeldModal, OccurrenceModal } from './money.js';
 import { StatusBanner, TaskItem, useTaskActions } from './tasks.js';
 
 const KEY = 'sf.withOthers';
@@ -14,6 +14,7 @@ export function Home({ version, lookups, openEntry, refresh }) {
   const [account, setAccount] = useState(null);
   const [held, setHeld] = useState(false);
   const [confirming, setConfirming] = useState(null);
+  const [changing, setChanging] = useState(null);
   const { run, modal } = useTaskActions(lookups, data?.accounts || [], refresh);
   const toggle = () => { const v = !withOthers; setWithOthers(v); try { localStorage.setItem(KEY, v ? '1' : '0'); } catch { /* ignore */ } };
 
@@ -91,6 +92,7 @@ export function Home({ version, lookups, openEntry, refresh }) {
         <span class="end">
           <b class=${e.amount < 0 ? 'expense' : 'income'}>${money(e.amount)}</b>
           ${(e.type === 'recurring' || e.type === 'pending') && e.amount > 0 && html`<button class="link small" onClick=${() => setConfirming({ recurring_id: e.recurring_id, occurrence: e.occurrence, name: e.name, amount: e.amount, kind: 'income' })}>נכנס?</button>`}
+          ${e.type === 'recurring' && e.amount < 0 && html`<button class="link small" onClick=${() => setChanging({ recurring_id: e.recurring_id, occurrence: e.occurrence, name: e.name, amount: -e.amount, usual_amount: e.usual_amount, changed: e.changed, kind: 'expense' })}>${e.changed ? 'סכום שונה ✎' : 'סכום אחר?'}</button>`}
         </span>
       </div>`)}
     </section>`}
@@ -120,6 +122,7 @@ export function Home({ version, lookups, openEntry, refresh }) {
 
     ${account && html`<${AccountModal} account=${account} lookups=${lookups} onClose=${() => setAccount(null)} onDone=${() => { setAccount(null); refresh(); }} />`}
     ${held && html`<${HeldModal} lookups=${lookups} onClose=${() => setHeld(false)} onDone=${refresh} />`}
+    ${changing && html`<${OccurrenceModal} item=${changing} onClose=${() => setChanging(null)} onDone=${() => { setChanging(null); refresh(); }} />`}
     ${confirming && html`<${ConfirmModal} item=${confirming} lookups=${lookups} onClose=${() => setConfirming(null)} onDone=${() => { setConfirming(null); refresh(); }} />`}
     ${modal}
   `;

@@ -185,3 +185,32 @@ export function ConfirmModal({ item, lookups, onClose, onDone }) {
     </form>
   <//>`;
 }
+
+/**
+ * A different amount this time for a recurring item (a credit, a partial month). For one still coming
+ * it is recorded with this amount on its day; for one already recorded the entry itself changes.
+ */
+export function OccurrenceModal({ item, onClose, onDone }) {
+  const f = useForm({ amount: toInput(item.amount), note: item.note || '' });
+  const save = (e) => {
+    e.preventDefault();
+    f.submit(() => api.put(`/recurring/${item.recurring_id}/occurrences/${item.occurrence}`, { amount: f.values.amount, note: f.values.note }))
+      .then((r) => r && (toast(r.recorded ? 'התנועה עודכנה' : 'נשמר להפעם'), onDone()));
+  };
+  const reset = () => api.del(`/recurring/${item.recurring_id}/occurrences/${item.occurrence}`).then(() => (toast('חזר לסכום הרגיל'), onDone()), (er) => toast(er.message, 'bad'));
+  const diff = Math.round(Number(String(f.values.amount).replace(',', '.')) * 100) - item.usual_amount;
+  return html`<${Modal} title=${`${item.name} · ${shortDate(item.occurrence)}`} onClose=${onClose}>
+    <form onSubmit=${save}>
+      <p class="muted">הסכום הרגיל: <b>${money(item.usual_amount)}</b>. כמה ${item.kind === 'income' ? 'נכנס' : 'יוצא'} הפעם?</p>
+      <div class=${`amount-input ${item.kind === 'income' ? 'income' : 'expense'}`}><span>₪</span><input inputmode="decimal" value=${f.values.amount} onInput=${f.set('amount')} autofocus /></div>
+      ${f.errors.amount && html`<div class="err">${f.errors.amount}</div>`}
+      ${Number.isFinite(diff) && diff !== 0 && html`<p class=${`small ${diff < 0 ? 'income' : 'expense'}`}>${diff < 0 ? `פחות ב-${money(-diff)} (זיכוי)` : `יותר ב-${money(diff)}`}</p>`}
+      <${Field} label="הערה"><input value=${f.values.note} onInput=${f.set('note')} placeholder="למשל: זיכוי על חודש קודם / חיוב יחסי" /><//>
+      <p class="hint">רק להפעם. בחודשים הבאים יחזור הסכום הרגיל.</p>
+      <div class="actions">
+        <button class="btn primary" disabled=${f.busy}>שמירה</button>
+        ${item.changed && !item.transaction_id && html`<button type="button" class="btn" onClick=${reset}>חזרה לסכום הרגיל</button>`}
+      </div>
+    </form>
+  <//>`;
+}

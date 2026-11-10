@@ -1,7 +1,7 @@
 // Income/expense entries, confirming recurring items, and the dashboard/forecast/summary reports.
 import { all, first, nowIso, run, setClause } from '../db.js';
 import { badRequest, json, noContent, notFound, readJson } from '../http.js';
-import { addDays, chargeDate, monthRange, shiftMonth } from '../dates.js';
+import { addDays, chargeDate, monthRange, occurrences, shiftMonth } from '../dates.js';
 import { movesBetween } from './moves.js';
 import { report, trackingStart } from '../money.js';
 import { computeTasks } from '../tasks.js';
@@ -121,6 +121,64 @@ export async function confirm({ env, request, params, actor }) {
     { userId: actor.id, source: 'web' }
   );
   return json(await first(env, `${SELECT_TX} WHERE t.id = ?`, newId), 201);
+}
+
+/**
+ * GET /recurring/:id/occurrences: the last and the coming occurrences of a recurring item, each with
+ * its amount (usual or changed for that time), and whether it was already recorded or skipped.
+ */
+export async function occurrencesOf({ env, params }) {
+  const rid = id(params.id);
+  const r = await first(env, `SELECT * FROM sf_recurring WHERE id = ?`, rid);
+  if (!r) throw notFound('לא נמצא');
+  const today = todayFor(env);
+  const from = addDays(today, -45);
+  const dates = occurrences(r, from, addDays(today, 400)).slice(0, 6);
+  const tx = await all(env, `SELECT id, occurrence, amount, note FROM sf_transactions WHERE recurring_id = ? AND occurrence >= ?`, rid, from);
+  const ov = await all(env, `SELECT occurrence, amount, note FROM sf_recurring_overrides WHERE recurring_id = ? AND occurrence >= ?`, rid, from);
+  const sk = await all(env, `SELECT occurrence FROM sf_recurring_skips WHERE recurring_id = ? AND occurrence >= ?`, rid, from);
+  return json(dates.map((d) => {
+    const t = tx.find((x) => x.occurrence === d);
+    const o = ov.find((x) => x.occurrence === d);
+    return {
+      occurrence: d, past: d <= today, usual_amount: r.amount,
+      amount: t ? t.amount : o ? o.amount : r.amount, changed: t ? t.amount !== r.amount : Boolean(o),
+      note: t ? t.note : o?.note || '', transaction_id: t?.id ?? null, skipped: sk.some((x) => x.occurrence === d),
+    };
+  }));
+}
+
+/**
+ * PUT /recurring/:id/occurrences/:occurrence { amount, note? }: a different amount this time (a credit, a
+ * partial month). Already recorded: the entry itself is updated; still coming: it is recorded (and shown
+ * in the forecast) with this amount.
+ */
+export async function setOccurrence({ env, request, params }) {
+  const rid = id(params.id);
+  if (!isDate(params.occurrence)) throw badRequest('תאריך לא תקין');
+  const r = await first(env, `SELECT * FROM sf_recurring WHERE id = ?`, rid);
+  if (!r) throw notFound('לא נמצא');
+  const d = fields(await readJson(request)).money('amount', { required: true }).str('note', { max: 200 }).done();
+  const t = await first(env, `SELECT id FROM sf_transactions WHERE recurring_id = ? AND occurrence = ?`, rid, params.occurrence);
+  if (t) {
+    await run(env, `UPDATE sf_transactions SET amount = ?, note = CASE WHEN ? != '' THEN ? ELSE note END, updated_at = ? WHERE id = ?`, d.amount, d.note, d.note, nowIso(), t.id);
+  } else {
+    await run(
+      env,
+      `INSERT INTO sf_recurring_overrides (recurring_id, occurrence, amount, note) VALUES (?, ?, ?, ?)
+       ON CONFLICT(recurring_id, occurrence) DO UPDATE SET amount = excluded.amount, note = excluded.note`,
+      rid, params.occurrence, d.amount, d.note
+    );
+  }
+  return json({ recorded: Boolean(t) });
+}
+
+/** DELETE /recurring/:id/occurrences/:occurrence: back to the usual amount (only for one still coming). */
+export async function resetOccurrence({ env, params }) {
+  const rid = id(params.id);
+  if (!isDate(params.occurrence)) throw badRequest('תאריך לא תקין');
+  await run(env, `DELETE FROM sf_recurring_overrides WHERE recurring_id = ? AND occurrence = ?`, rid, params.occurrence);
+  return noContent();
 }
 
 /** DELETE /recurring/:id/skip/:occurrence: undo "did not happen this time" (it waits again / is recorded again). */

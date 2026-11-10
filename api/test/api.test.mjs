@@ -434,3 +434,37 @@ test('phone line: shekels*agorot, a spoken or typed note, or none', async () => 
   assert.match(c2, /=k0,/);
   assert.doesNotMatch(c2, /הערה:/);
 });
+
+test('a different amount this time for an automatic monthly expense (credit / partial month)', async () => {
+  const { app, acc } = await ready();
+  const today = todayFor(app.env);
+  await app.call('PATCH', `/accounts/${acc.id}`, { opening_date: today, opening_balance: 1000 });
+  const soon = addDays(today, 5);
+  const r = (await app.call('POST', '/recurring', { kind: 'expense', name: 'חשמל', amount: 300, account_id: acc.id, day_of_month: Number(soon.slice(8, 10)), start_date: today })).data;
+  const occ = (await app.call('GET', `/recurring/${r.id}/occurrences`)).data;
+  const next = occ.find((o) => !o.past);
+  assert.equal(next.amount, 30000);
+  // this month: 120 after a credit
+  assert.equal((await app.call('PUT', `/recurring/${r.id}/occurrences/${next.occurrence}`, { amount: 120, note: 'חשמל (זיכוי)' })).data.recorded, false);
+  let fc = (await app.call('GET', '/forecast?days=10')).data;
+  const ev = fc.events.find((e) => e.recurring_id === r.id && e.occurrence === next.occurrence);
+  assert.equal(ev.amount, -12000);
+  assert.equal(ev.changed, true);
+  // the month after keeps the usual amount
+  const after = (await app.call('GET', `/recurring/${r.id}/occurrences`)).data.filter((o) => !o.past)[1];
+  assert.equal(after.amount, 30000);
+  // back to the usual amount
+  await app.call('DELETE', `/recurring/${r.id}/occurrences/${next.occurrence}`);
+  fc = (await app.call('GET', '/forecast?days=10')).data;
+  assert.equal(fc.events.find((e) => e.recurring_id === r.id).amount, -30000);
+});
+
+test('a different amount for an occurrence that was already recorded updates that entry', async () => {
+  const { app, acc } = await ready();
+  const today = todayFor(app.env);
+  const r = (await app.call('POST', '/recurring', { kind: 'expense', name: 'ארנונה', amount: 500, account_id: acc.id, day_of_month: Number(today.slice(8, 10)), start_date: today })).data;
+  await app.call('GET', '/dashboard'); // records today's
+  assert.equal((await app.call('PUT', `/recurring/${r.id}/occurrences/${today}`, { amount: 350 })).data.recorded, true);
+  const tx = (await app.call('GET', `/transactions?month=${today.slice(0, 7)}`)).data.items.find((t) => t.recurring_id === r.id);
+  assert.equal(tx.amount, 35000);
+});

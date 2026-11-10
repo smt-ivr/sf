@@ -1,13 +1,14 @@
 // Cash-flow forecast: what will leave/enter the bank accounts day by day, with the running balance.
 import { useState } from 'preact/hooks';
 import { ErrorBox, html, Loading, longDate, money, Segments, useApi } from '../ui.js';
-import { ConfirmModal } from './money.js';
+import { ConfirmModal, OccurrenceModal } from './money.js';
 
 const TYPE = { card_bill: '💳', recurring: '↻', pending: '⏳', entry: '•' };
 
 export function Forecast({ version, lookups, refresh }) {
   const [days, setDays] = useState(30);
   const [confirming, setConfirming] = useState(null);
+  const [changing, setChanging] = useState(null);
   const { data, error, reload } = useApi(`/forecast?days=${days}`, [version]);
   if (error) return html`<${ErrorBox} error=${error} retry=${reload} />`;
 
@@ -31,9 +32,11 @@ export function Forecast({ version, lookups, refresh }) {
         ${g.items.map((e) => html`<div class="list-row">
           <span>${TYPE[e.type]} ${e.name}${e.count > 1 ? html` <span class="muted small">(${e.count} רכישות)</span>` : ''}${e.type === 'pending' ? html` <span class="muted small">(טרם אושר)</span>` : ''}</span>
           <span class="end"><b class=${e.amount < 0 ? 'expense' : 'income'}>${money(e.amount)}</b><span class=${`small ${e.balance_after < 0 ? 'expense' : 'muted'}`}>${money(e.balance_after)}</span>
-            ${(e.type === 'recurring' || e.type === 'pending') && html`<button class="link small" onClick=${() => setConfirming({ recurring_id: e.recurring_id, occurrence: e.occurrence, name: e.name, amount: Math.abs(e.amount), kind: e.amount > 0 ? 'income' : 'expense' })}>${e.amount > 0 ? 'נכנס?' : 'יצא?'}</button>`}</span>
+            ${(e.type === 'recurring' || e.type === 'pending') && e.amount > 0 && html`<button class="link small" onClick=${() => setConfirming({ recurring_id: e.recurring_id, occurrence: e.occurrence, name: e.name, amount: Math.abs(e.amount), kind: 'income' })}>נכנס?</button>`}
+            ${e.type === 'recurring' && e.amount < 0 && html`<button class="link small" onClick=${() => setChanging({ recurring_id: e.recurring_id, occurrence: e.occurrence, name: e.name, amount: -e.amount, usual_amount: e.usual_amount, changed: e.changed, kind: 'expense' })}>${e.changed ? 'סכום שונה ✎' : 'סכום אחר?'}</button>`}</span>
         </div>`)}
       </section>`)}
+      ${changing && html`<${OccurrenceModal} item=${changing} onClose=${() => setChanging(null)} onDone=${() => { setChanging(null); refresh(); }} />`}
       ${confirming && html`<${ConfirmModal} item=${confirming} lookups=${lookups} onClose=${() => setConfirming(null)} onDone=${() => { setConfirming(null); refresh(); }} />`}
       <p class="muted small">💳 חיוב כרטיס אשראי (רכישות שכבר נעשו) · ↻ תנועה קבועה · ⏳ ממתין לאישור. מזומן לא נכלל ביתרה.</p>
     `}

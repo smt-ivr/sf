@@ -1,5 +1,6 @@
 // Fixed income/expenses: salaries, standing orders, subscriptions, loans.
 import { useState } from 'preact/hooks';
+import { OccurrenceModal } from './money.js';
 import { api } from '../api.js';
 import { confirmBox, ErrorBox, Field, gematria, html, Loading, Modal, money, num, Segments, toast, toInput, useApi, useForm, paymentName, userName, shortDate } from '../ui.js';
 
@@ -109,5 +110,22 @@ function RecurringForm({ item, lookups, onClose, onSaved }) {
         ${editing && html`<button type="button" class="btn danger" onClick=${remove}>מחיקה</button>`}
       </div>
     </form>
+    ${editing && html`<${Occurrences} item=${item} />`}
   <//>`;
+}
+
+/** The last and coming times of a recurring item, each with its amount; tap to change it for that time. */
+function Occurrences({ item }) {
+  const { data, reload } = useApi(`/recurring/${item.id}/occurrences`);
+  const [open, setOpen] = useState(null);
+  if (!data) return null;
+  return html`<div class="card held">
+    <b class="small">סכום לפי חודש</b>
+    <p class="hint">יצא סכום אחר באחד החודשים (זיכוי, חיוב יחסי)? לוחצים עליו ומשנים רק אותו.</p>
+    ${data.map((o) => html`<button type="button" class="list-row tx small" onClick=${() => !o.skipped && setOpen(o)}>
+      <span>${shortDate(o.occurrence)} ${o.skipped ? '· לא היה' : o.transaction_id ? '· נרשם' : o.past ? '· ממתין' : ''}${o.note && o.changed ? ` · ${o.note}` : ''}</span>
+      <b class=${o.changed ? 'expense' : ''}>${money(o.amount)}${o.changed ? ' ✎' : ''}</b>
+    </button>`)}
+    ${open && html`<${OccurrenceModal} item=${{ ...open, recurring_id: item.id, name: item.name, kind: item.kind }} onClose=${() => setOpen(null)} onDone=${() => { setOpen(null); reload(); }} />`}
+  </div>`;
 }

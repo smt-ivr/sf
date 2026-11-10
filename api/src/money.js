@@ -68,8 +68,14 @@ async function recurringState(env, from) {
   );
   const seen = new Set(done.map((r) => `${r.recurring_id}|${r.occurrence}`));
   const cards = new Map((await all(env, `SELECT * FROM sf_cards`)).map((c) => [c.id, c]));
-  return { items, seen, cards, cashId: await cashAccountId(env) };
+  const ov = await all(env, `SELECT * FROM sf_recurring_overrides WHERE occurrence >= ?`, from);
+  const overrides = new Map(ov.map((o) => [`${o.recurring_id}|${o.occurrence}`, o]));
+  return { items, seen, cards, overrides, cashId: await cashAccountId(env) };
 }
+
+/** The amount of one occurrence: its override (a credit, a partial month) or the usual amount. */
+const amountOf = (r, occ, overrides) => overrides.get(`${r.id}|${occ}`)?.amount ?? r.amount;
+const noteOf = (r, occ, overrides) => overrides.get(`${r.id}|${occ}`)?.note || r.name;
 
 /**
  * Records automatic recurring items whose day has come (no cron: called whenever the app or the
@@ -77,7 +83,7 @@ async function recurringState(env, from) {
  */
 export async function syncRecurring(env, today = todayFor(env)) {
   const from = addDays(today, -LOOKBACK_DAYS);
-  const { items, seen, cards, cashId } = await recurringState(env, from);
+  const { items, seen, cards, overrides, cashId } = await recurringState(env, from);
   const stmts = [];
   for (const r of items.filter((r) => r.auto)) {
     for (const occ of occurrences(r, from, today)) {
@@ -87,8 +93,8 @@ export async function syncRecurring(env, today = todayFor(env)) {
         env.DB.prepare(
           `INSERT OR IGNORE INTO sf_transactions (kind, amount, date, charge_date, category_id, account_id, card_id, owner_id, recurring_id, occurrence, note, source)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'recurring')`
-        ).bind(r.kind, r.amount, occ, chargeDate(occ, card), r.category_id, card ? card.account_id : r.account_id ?? cashId, card ? card.id : null,
-          r.owner_id, r.id, occ, r.name)
+        ).bind(r.kind, amountOf(r, occ, overrides), occ, chargeDate(occ, card), r.category_id, card ? card.account_id : r.account_id ?? cashId, card ? card.id : null,
+          r.owner_id, r.id, occ, noteOf(r, occ, overrides))
       );
     }
   }
@@ -98,14 +104,15 @@ export async function syncRecurring(env, today = todayFor(env)) {
 
 /** Occurrences (recorded or not) of the recurring items between from..to, minus recorded and skipped. */
 async function openOccurrences(env, from, to, today) {
-  const { items, seen, cards, cashId } = await recurringState(env, addDays(today, -LOOKBACK_DAYS));
+  const { items, seen, cards, overrides, cashId } = await recurringState(env, addDays(today, -LOOKBACK_DAYS));
   const out = [];
   for (const r of items) {
     const card = r.card_id ? cards.get(r.card_id) : null;
     for (const occ of occurrences(r, from, to)) {
       if (seen.has(`${r.id}|${occ}`)) continue;
       out.push({
-        recurring_id: r.id, name: r.name, kind: r.kind, amount: r.amount, occurrence: occ,
+        recurring_id: r.id, name: r.name, kind: r.kind, amount: amountOf(r, occ, overrides), usual_amount: r.amount,
+        changed: overrides.has(`${r.id}|${occ}`), occurrence: occ,
         charge_date: chargeDate(occ, card), account_id: card ? card.account_id : r.account_id ?? cashId, card_id: card ? card.id : null,
         category_id: r.category_id, owner_id: r.owner_id, auto: r.auto === 1,
       });
@@ -208,6 +215,7 @@ export async function forecast(env, to, today = todayFor(env)) {
     events.push({
       type: overdue ? 'pending' : 'recurring', date: overdue ? addDays(today, 1) : o.charge_date, occurrence: o.occurrence,
       recurring_id: o.recurring_id, account_id: o.account_id, name: o.name, amount: o.kind === 'income' ? o.amount : -o.amount,
+      changed: o.changed, usual_amount: o.usual_amount,
     });
   }
   for (const b of bills.values()) if (b.items?.length) b.name = `${b.name}: ${b.items.slice(0, 3).join(', ')}${b.items.length > 3 ? '…' : ''}`;
