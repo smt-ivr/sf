@@ -239,3 +239,4 @@ input:focus, select:focus { outline: 2px solid var(--brand); outline-offset: -1p
 .minus.warn { color: #b07a00; }
 .minus.bad { color: var(--expense); font-weight: 600; }
 .pending-move { color: #b07a00; }
+.plain { background: none; border: 0; padding: 0; text-align: start; cursor: pointer; display: flex; flex-direction: column; min-width: 0; color: inherit; font: inherit; }

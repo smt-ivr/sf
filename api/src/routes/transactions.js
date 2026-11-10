@@ -229,7 +229,14 @@ export async function dashboard({ env }) {
     report(env, start, today),
   ]);
   const tasks = await computeTasks(env, { today, fc, held, pending });
-  return json({ today, month: now, previous_month: before, accounts, pending, forecast: fc, recent, held, tasks, since: { ...since, tracking_start: start } });
+  // what the recurring items recorded by themselves lately (to fix the amount if it came out different)
+  const autoRecent = await all(
+    env,
+    `SELECT t.*, r.amount AS usual_amount, r.name AS recurring_name FROM sf_transactions t JOIN sf_recurring r ON r.id = t.recurring_id
+     WHERE t.source = 'recurring' AND t.date >= ? ORDER BY t.date DESC, t.id DESC LIMIT 12`,
+    addDays(today, -14)
+  );
+  return json({ today, month: now, previous_month: before, accounts, pending, forecast: fc, recent, auto_recent: autoRecent, held, tasks, since: { ...since, tracking_start: start } });
 }
 
 /** GET /forecast?days=60 (or to=YYYY-MM-DD) */

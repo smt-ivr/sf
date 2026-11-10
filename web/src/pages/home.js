@@ -110,6 +110,19 @@ export function Home({ version, lookups, openEntry, refresh }) {
       <p class="muted small">מאז העסקה הראשונה (${shortDate(since.tracking_start)}): נכנס ${money(since.income)}, יצא ${money(since.expense)}${since.unrecorded < 0 ? html` · <span class="expense">${money(-since.unrecorded)} יצאו בלי רישום</span>` : ''}</p>
     </section>
 
+    ${data.auto_recent.length > 0 && html`<section class="card">
+      <h3>יצא ונכנס אוטומטית לאחרונה</h3>
+      <p class="muted small">יצא סכום אחר ממה שרשום (זיכוי, חיוב יחסי)? לוחצים "סכום אחר?" ומתקנים. היתרה מתעדכנת.</p>
+      ${data.auto_recent.map((t) => html`<div class="list-row">
+        <button class="plain" onClick=${() => openEntry(t)}><b>${t.recurring_name}</b>
+          <span class="muted small">${shortDate(t.date)} · ${paymentName(t, lookups)}${t.amount !== t.usual_amount ? ` · רגיל ${money(t.usual_amount)}` : ''}</span></button>
+        <span class="end">
+          <b class=${t.kind}>${t.kind === 'expense' ? '−' : '+'}${money(t.amount)}${t.amount !== t.usual_amount ? ' ✎' : ''}</b>
+          <button class="link small" onClick=${() => setChanging({ recurring_id: t.recurring_id, occurrence: t.occurrence, name: t.recurring_name, amount: t.amount, usual_amount: t.usual_amount, changed: t.amount !== t.usual_amount, transaction_id: t.id, note: t.note !== t.recurring_name ? t.note : '', kind: t.kind })}>סכום אחר?</button>
+        </span>
+      </div>`)}
+    </section>`}
+
     <section class="card">
       <h3>נרשמו לאחרונה</h3>
       ${recent.length === 0 && html`<p class="muted">עוד לא נרשמו תנועות. לוחצים על + למטה.</p>`}

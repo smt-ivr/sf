@@ -464,6 +464,8 @@ test('a different amount for an occurrence that was already recorded updates tha
   const today = todayFor(app.env);
   const r = (await app.call('POST', '/recurring', { kind: 'expense', name: 'ארנונה', amount: 500, account_id: acc.id, day_of_month: Number(today.slice(8, 10)), start_date: today })).data;
   await app.call('GET', '/dashboard'); // records today's
+  const auto = (await app.call('GET', '/dashboard')).data.auto_recent.find((t) => t.recurring_id === r.id);
+  assert.equal(auto.usual_amount, 50000);
   assert.equal((await app.call('PUT', `/recurring/${r.id}/occurrences/${today}`, { amount: 350 })).data.recorded, true);
   const tx = (await app.call('GET', `/transactions?month=${today.slice(0, 7)}`)).data.items.find((t) => t.recurring_id === r.id);
   assert.equal(tx.amount, 35000);
