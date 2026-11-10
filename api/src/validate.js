@@ -156,9 +156,21 @@ export function isDate(s) {
   return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3];
 }
 
-/** 12 / "12.5" / "12,50" -> 1250 agorot; anything else -> null. Negative numbers are returned negative. */
+/**
+ * 12 / "12.5" / "12,50" -> 1250 agorot; anything else -> null. Negative numbers are returned negative.
+ * More than 2 decimals ("6.065", from a supplier's mail) is rounded to agorot like the bank: half an
+ * agora goes to the even agora (6.065 -> 6.06, 6.075 -> 6.08).
+ */
 export function toAgorot(v) {
   const s = typeof v === 'number' ? String(v) : typeof v === 'string' ? clean(v).replace(',', '.').replace(/[₪\s]/g, '') : '';
-  if (!/^-?\d+(\.\d{1,2})?$/.test(s)) return null;
-  return Math.round(Number(s) * 100);
+  const m = /^(-?)(\d+)(?:\.(\d{1,6}))?$/.exec(s);
+  if (!m) return null;
+  const frac = (m[3] || '').padEnd(2, '0');
+  let agorot = Number(m[2]) * 100 + Number(frac.slice(0, 2));
+  const rest = frac.slice(2); // beyond agorot, compared as text to avoid floating point errors
+  if (rest && /[1-9]/.test(rest)) {
+    const half = '5'.padEnd(rest.length, '0');
+    if (rest > half || (rest === half && agorot % 2 === 1)) agorot += 1;
+  }
+  return m[1] ? -agorot : agorot;
 }

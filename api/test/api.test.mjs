@@ -470,3 +470,16 @@ test('a different amount for an occurrence that was already recorded updates tha
   const tx = (await app.call('GET', `/transactions?month=${today.slice(0, 7)}`)).data.items.find((t) => t.recurring_id === r.id);
   assert.equal(tx.amount, 35000);
 });
+
+test('amounts with more than 2 decimals are rounded to agorot like the bank (6.065 -> 6.06)', async () => {
+  const { toAgorot } = await import('../src/validate.js');
+  assert.equal(toAgorot('6.065'), 606);
+  assert.equal(toAgorot('6.075'), 608);
+  assert.equal(toAgorot('6.0651'), 607);
+  assert.equal(toAgorot('1.999'), 200);
+  assert.equal(toAgorot('12,5'), 1250);
+  const { app, acc } = await ready();
+  const r = await app.call('POST', '/transactions', { kind: 'expense', amount: '6.065', date: todayFor(app.env), account_id: acc.id });
+  assert.equal(r.status, 201);
+  assert.equal(r.data.amount, 606);
+});
