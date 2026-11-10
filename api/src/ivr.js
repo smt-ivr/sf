@@ -17,9 +17,29 @@ const RESERVED = /[.\-"'&|=׳״,]/g; // characters Yemot treats as syntax inside
 export const t = (s) => `t-${String(s).replace(RESERVED, ' ').replace(/\s+/g, ' ').trim()}`;
 const join = (parts) => parts.flat().filter(Boolean).join('.');
 const message = (parts) => `id_list_message=${join(parts)}`;
-/** Keypad read. Options: val_name, re_enter_if_exists, max, min, sec_wait, playback, block *, block 0, replace, allowed, attempts, allow_empty, empty_val, block_change_keyboard */
-const read = (parts, name, { max = 1, min = 1, wait = 10 } = {}) =>
-  `read=${join(parts)}=${[name, 'no', max, min, wait, 'No', 'yes', 'no', '', '', 2, 'Ok', 'None', ''].join(',')}`;
+/**
+ * Keypad read. Options (Yemot API module docs): val_name, re_enter_if_exists, max, min, sec_wait,
+ * input type (No / Number / HebrewKeyboard ...), block *, block 0, replace, allowed, attempts,
+ * allow_empty, empty_val, block_change_keyboard
+ */
+const read = (parts, name, { max = 1, min = 1, wait = 10, type = 'No', asterisk = false, allowed = '' } = {}) =>
+  `read=${join(parts)}=${[name, 'no', max, min, wait, type, asterisk ? 'no' : 'yes', 'no', '', allowed, 2, 'Ok', 'None', ''].join(',')}`;
+/**
+ * Speech to text: val_name, re_enter_if_exists, 'voice', language, block keypad (empty = typing allowed
+ * too), max digits, engine ('record' = the recording engine, for free speech), max silence, max length.
+ */
+const readVoice = (parts, name) => `read=${join(parts)}=${[name, 'no', 'voice', 'he-IL', '', '', 'record', 3, 30].join(',')}`;
+
+/**
+ * "12" -> 1200, "12*50" -> 1250, "12*5" -> 1205 (shekels, star, agorot). Also "12.5"/"12/50" in case
+ * Yemot replaced the star. null when not a positive amount.
+ */
+export function parseIvrAmount(raw) {
+  const m = /^(\d{1,7})(?:[*./](\d{1,2}))?$/.exec(String(raw ?? '').trim());
+  if (!m) return null;
+  const agorot = Number(m[1]) * 100 + (m[2] ? Number(m[2]) : 0);
+  return agorot > 0 ? agorot : null;
+}
 const respond = (...cmds) => new Response(cmds.filter(Boolean).join('&'), { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 const goodbye = (parts) => respond(message(parts), '');
 
@@ -30,6 +50,12 @@ export function speakMoney(agorot) {
   const s = Math.floor(a / 100);
   const ag = a % 100;
   return `${neg ? 'מינוס ' : ''}${s} ${s === 1 ? 'שקל' : 'שקלים'}${ag ? ` ו ${ag} אגורות` : ''}`;
+}
+
+/** What Yemot sent back as the note: empty / "None" (nothing said) -> ''. */
+function cleanNote(raw) {
+  const s = String(raw ?? '').replace(/\s+/g, ' ').trim();
+  return !s || s === 'None' || s === 'null' ? '' : s.slice(0, 300);
 }
 
 async function readParams(request, url) {
@@ -92,9 +118,11 @@ async function round(env, c) {
 
   // amount
   const a = v('a');
-  if (a === undefined) return respond(read([t('הקישו את הסכום בשקלים ובסיום סולמית')], `a${n}`, { max: 7 }));
-  const amount = Number(a) * 100;
-  if (!Number.isInteger(amount) || amount <= 0) return (await nextRound(env, c, [t('הסכום לא תקין')])).response;
+  if (a === undefined) {
+    return respond(read([t('הקישו את הסכום בשקלים. אם יש אגורות, הקישו כוכבית ואחריה את האגורות. בסיום הקישו סולמית')], `a${n}`, { max: 10, asterisk: true }));
+  }
+  const amount = parseIvrAmount(a);
+  if (!amount) return (await nextRound(env, c, [t('הסכום לא תקין')])).response;
 
   // category
   const cats = await all(env, `SELECT id, name FROM sf_categories WHERE kind = ? AND is_active = 1 ORDER BY sort, id LIMIT 99`, kind);
@@ -119,9 +147,23 @@ async function round(env, c) {
   const method = Number(pv) === 0 ? { name: 'מזומן' } : methods[Number(pv) - 1];
   if (!method) return (await nextRound(env, c, [t('אמצעי תשלום לא קיים')])).response;
 
+  // note: 1 say it (speech to text), 2 type it on the keypad (Hebrew letters), 0 no note
+  const nv = v('n');
+  if (nv === undefined) return respond(read([t('להוספת הערה בדיבור הקישו 1, להקלדת הערה 2, בלי הערה 0')], `n${n}`, { allowed: '012' }));
+  let note = '';
+  if (nv === '1' || nv === '2') {
+    const tv = v('t');
+    if (tv === undefined) {
+      return respond(nv === '1'
+        ? readVoice([t('אמרו את ההערה אחרי הצליל, ובסיום הקישו סולמית')], `t${n}`)
+        : read([t('הקלידו את ההערה באותיות, ובסיום הקישו סולמית')], `t${n}`, { max: 60, type: 'HebrewKeyboard' }));
+    }
+    note = cleanNote(tv);
+  }
+
   // confirm
   const k = v('k');
-  const what = `${kind === 'expense' ? 'הוצאה' : 'הכנסה'} של ${speakMoney(amount)}${cat ? `, ${cat.name}` : ''}, ${method.name}`;
+  const what = `${kind === 'expense' ? 'הוצאה' : 'הכנסה'} של ${speakMoney(amount)}${cat ? `, ${cat.name}` : ''}, ${method.name}${note ? `, הערה: ${note}` : ''}`;
   if (k === undefined) return respond(read([t(what), t('לאישור הקישו 1, לביטול 2')], `k${n}`));
   if (k !== '1') return (await nextRound(env, c, [t('בוטל')])).response;
 
@@ -129,7 +171,7 @@ async function round(env, c) {
   if (advanced) {
     await insertTransaction(
       env,
-      { kind, amount, date: todayFor(env), category_id: cat?.id ?? null, card_id: method.card_id ?? null, account_id: method.account_id ?? null, owner_id: c.user.id, note: '' },
+      { kind, amount, date: todayFor(env), category_id: cat?.id ?? null, card_id: method.card_id ?? null, account_id: method.account_id ?? null, owner_id: c.user.id, note },
       { userId: c.user.id, source: 'phone' }
     );
   }

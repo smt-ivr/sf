@@ -159,9 +159,11 @@ test('phone line: key, caller ID, an expense on a card, and no double save on re
   const ci = String(cats.findIndex((c) => c.id === food.id) + 1);
   const payMenu = await ivr(app, { ...base, m0: '1', a0: '75', c0: ci });
   assert.match(payMenu, /ויזה הקישו 1/);
-  const confirm = await ivr(app, { ...base, m0: '1', a0: '75', c0: ci, p0: '1' });
+  const noteMenu = await ivr(app, { ...base, m0: '1', a0: '75', c0: ci, p0: '1' });
+  assert.match(noteMenu, /=n0,/);
+  const confirm = await ivr(app, { ...base, m0: '1', a0: '75', c0: ci, p0: '1', n0: '0' });
   assert.match(confirm, /75 שקלים/);
-  const done = { ...base, m0: '1', a0: '75', c0: ci, p0: '1', k0: '1' };
+  const done = { ...base, m0: '1', a0: '75', c0: ci, p0: '1', n0: '0', k0: '1' };
   assert.match(await ivr(app, done), /נשמר.*=m1,/);
   assert.match(await ivr(app, done), /=m1,/); // Yemot retried the same request
 
@@ -403,3 +405,32 @@ test('deleting a confirmed salary sends it back to "waiting"; "did not happen" c
   assert.ok((await app.call('GET', '/dashboard')).data.pending.some((p) => p.recurring_id === r.id), 'waiting after undo');
 });
 
+
+test('phone line: shekels*agorot, a spoken or typed note, or none', async () => {
+  const { parseIvrAmount } = await import('../src/ivr.js');
+  assert.equal(parseIvrAmount('12'), 1200);
+  assert.equal(parseIvrAmount('12*50'), 1250);
+  assert.equal(parseIvrAmount('12*5'), 1205);
+  assert.equal(parseIvrAmount('0*90'), 90);
+  assert.equal(parseIvrAmount('12*'), null);
+  assert.equal(parseIvrAmount('0'), null);
+  assert.equal(parseIvrAmount('1*2*3'), null);
+
+  const { app } = await ready();
+  const key = (await app.call('GET', '/settings')).data.ivr_key;
+  const base = { key, ApiPhone: '0583206823', ApiCallId: 'n1', m0: '1', a0: '23*40', c0: '0', p0: '0' };
+  assert.match(await ivr(app, { ...base, n0: '1' }), /=t0,no,voice,he-IL,/); // speech to text
+  assert.match(await ivr(app, { ...base, n0: '2' }), /=t0,no,60,1,10,HebrewKeyboard,/); // typing letters
+  const confirm = await ivr(app, { ...base, n0: '1', t0: 'קניות בשוק' });
+  assert.match(confirm, /23 שקלים ו 40 אגורות/);
+  assert.match(confirm, /הערה: קניות בשוק/);
+  assert.match(await ivr(app, { ...base, n0: '1', t0: 'קניות בשוק', k0: '1' }), /נשמר/);
+  const tx = (await app.call('GET', `/transactions?month=${todayFor(app.env).slice(0, 7)}`)).data.items.find((x) => x.source === 'phone');
+  assert.equal(tx.amount, 2340);
+  assert.equal(tx.note, 'קניות בשוק');
+  // nothing said: saved without a note
+  const b2 = { ...base, ApiCallId: 'n2', n0: '1', t0: 'None' };
+  const c2 = await ivr(app, b2);
+  assert.match(c2, /=k0,/);
+  assert.doesNotMatch(c2, /הערה:/);
+});
