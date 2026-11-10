@@ -5,7 +5,7 @@ export const DEFAULTS = {
   // Same Google client as the other smti.uk projects (the origin smti.uk is already allowed there).
   google_client_id: '89500817024-tbvsuu4dci6bqh173l65ua9lc65pe24p.apps.googleusercontent.com',
   google_login_enabled: '1',
-  ivr_key: '',          // the phone line works only with ?key=<this> in Yemot's api_link
+  ivr_key: '',          // the phone line works only when Yemot sends key=<this> (ext.ini: api_add_0=key=<this>)
   ivr_enabled: '1',
 };
 

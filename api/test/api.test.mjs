@@ -61,7 +61,7 @@ test('setup once, login by phone and e-mail, second user', async () => {
   assert.equal(w.data.phones.length, 2);
   assert.equal((await app.call('POST', '/users', { name: 'x', phones: ['0521111111'] })).status, 409);
   assert.equal((await app.call('GET', '/users')).data.length, 2);
-  assert.equal((await app.call('GET', '/settings')).data.ivr_link.startsWith('https://smti.uk/sf/api/ivr?key='), true);
+  assert.ok((await app.call('GET', '/settings')).data.ivr_key);
 });
 
 async function ready() {
@@ -144,7 +144,9 @@ test('recurring: automatic items are recorded once; manual ones wait for confirm
 
 test('phone line: key, caller ID, an expense on a card, and no double save on retry', async () => {
   const { app, regular, food } = await ready();
-  const key = new URL((await app.call('GET', '/settings')).data.ivr_link).searchParams.get('key');
+  const st = (await app.call('GET', '/settings')).data;
+  assert.equal(st.ivr_link, 'https://smti.uk/sf/api/ivr'); // no query string: Yemot adds key via api_add_0
+  const key = st.ivr_key;
 
   assert.match(await ivr(app, { key: 'bad', ApiPhone: '0583206823', ApiCallId: 'c1' }), /חסומה/);
   assert.match(await ivr(app, { key, ApiPhone: '0500000000', ApiCallId: 'c1' }), /אינו מחובר/);

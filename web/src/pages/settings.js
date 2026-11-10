@@ -182,7 +182,7 @@ function PhoneLine() {
     if (!(await confirmBox('ליצור קישור חדש? הקישור הישן יפסיק לעבוד, וצריך לעדכן אותו בימות המשיח.', { ok: 'יצירה' }))) return;
     api.post('/settings/ivr-key').then(() => (toast('נוצר קישור חדש'), reload()));
   };
-  const ext = `type=api\napi_link=${data.ivr_link}\napi_hangup_send=yes`;
+  const ext = `type=api\napi_link=${data.ivr_link}\napi_add_0=key=${data.ivr_key}\napi_hangup_send=yes`;
   return html`<section class="card">
     <div class="month-head"><h3>☎ שלוחה בימות המשיח</h3>
       <label class="switch"><input type="checkbox" checked=${data.ivr_enabled} onChange=${(e) => patch({ ivr_enabled: e.target.checked })} /> פעילה</label></div>

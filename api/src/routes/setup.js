@@ -259,7 +259,9 @@ export async function getAppSettings({ env, url }) {
     google_client_id: s.google_client_id,
     google_login_enabled: s.google_login_enabled === '1',
     ivr_enabled: s.ivr_enabled === '1',
-    ivr_link: s.ivr_key ? `${url.origin}${base}/api/ivr?key=${s.ivr_key}` : null,
+    // Yemot's api_link takes no query string: the key goes on its own line (api_add_0=key=...)
+    ivr_link: `${url.origin}${base}/api/ivr`,
+    ivr_key: s.ivr_key || null,
   });
 }
 
