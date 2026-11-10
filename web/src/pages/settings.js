@@ -79,7 +79,7 @@ function AccountForm({ item, lookups, onClose, onSaved }) {
       <${Field} label="של מי"><${OwnerSelect} value=${v.owner_id} onChange=${f.set('owner_id')} lookups=${lookups} /><//>
     </div>
     <div class="row2">
-      <${Field} label="יתרה (₪)" error=${f.errors.opening_balance} hint="מינוס = חובה"><input inputmode="decimal" value=${v.opening_balance} onInput=${f.set('opening_balance')} /><//>
+      <${Field} label="יתרת פתיחה (₪)" error=${f.errors.opening_balance} hint="נקודת ההתחלה, לפני כל התנועות שנרשמו. מינוס = חובה. כדי ליישר מול הבנק: בדף הבית לוחצים על החשבון ← עדכון יתרה"><input inputmode="decimal" value=${v.opening_balance} onInput=${f.set('opening_balance')} /><//>
       <${Field} label="נכון לתחילת יום" error=${f.errors.opening_date}><input type="date" value=${v.opening_date} onInput=${f.set('opening_date')} /><//>
     </div>
     ${item.id && html`<${Field} label="מצב"><${ActiveSelect} value=${v.is_active} onChange=${f.set('is_active')} /><//>`}

@@ -1,7 +1,7 @@
 // Fixed income/expenses: salaries, standing orders, subscriptions, loans.
 import { useState } from 'preact/hooks';
 import { api } from '../api.js';
-import { confirmBox, ErrorBox, Field, gematria, html, Loading, Modal, money, num, Segments, toast, toInput, useApi, useForm, paymentName, userName } from '../ui.js';
+import { confirmBox, ErrorBox, Field, gematria, html, Loading, Modal, money, num, Segments, toast, toInput, useApi, useForm, paymentName, userName, shortDate } from '../ui.js';
 
 const when = (r) => (r.calendar === 'hebrew'
   ? `ב-${gematria(r.day_of_month)} לחודש העברי${r.day_of_month === 1 ? ' (ראש חודש)' : ''}`
@@ -9,7 +9,9 @@ const when = (r) => (r.calendar === 'hebrew'
 
 export function Recurring({ version, lookups, refresh }) {
   const { data, error, reload } = useApi('/recurring', [version]);
+  const skips = useApi('/recurring/skips', [version]);
   const [edit, setEdit] = useState(null);
+  const unskip = (s) => api.del(`/recurring/${s.recurring_id}/skip/${s.occurrence}`).then(() => { toast('הוחזר'); skips.reload(); refresh(); }, (e) => toast(e.message, 'bad'));
   if (error) return html`<${ErrorBox} error=${error} retry=${reload} />`;
   if (!data) return html`<${Loading} />`;
   const section = (kind, title) => {
@@ -27,6 +29,14 @@ export function Recurring({ version, lookups, refresh }) {
   };
   return html`
     <a class="link small" href="#/settings">← להגדרות</a>
+    ${skips.data?.length > 0 && html`<section class="card">
+      <h3>סומנו "לא היה הפעם"</h3>
+      <p class="muted small">אם סימנת בטעות (או מחקת תנועה אוטומטית), לוחצים "החזרה" והיא תחזור לחכות לאישור או תירשם שוב.</p>
+      ${skips.data.map((s) => html`<div class="list-row">
+        <span><b>${s.name}</b><span class="muted small">${shortDate(s.occurrence)} · ${money(s.amount)}</span></span>
+        <button class="btn small" onClick=${() => unskip(s)}>החזרה</button>
+      </div>`)}
+    </section>`}
     ${section('income', 'הכנסות קבועות')}
     ${section('expense', 'הוצאות קבועות')}
     <p class="muted small">"נרשם אוטומטית": ביום שלו התנועה נרשמת לבד (מתאים להוראות קבע בסכום קבוע). "דורש אישור": מופיע בדף הבית ב"ממתין לאישור", ושם מאשרים עם הסכום בפועל (מתאים למשכורת שמשתנה).</p>

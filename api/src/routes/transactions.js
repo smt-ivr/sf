@@ -84,11 +84,16 @@ export async function patch({ env, request, params }) {
 
 export async function remove({ env, params }) {
   const tid = id(params.id);
-  const t = await first(env, `SELECT recurring_id, occurrence FROM sf_transactions WHERE id = ?`, tid);
+  const t = await first(
+    env,
+    `SELECT t.recurring_id, t.occurrence, r.auto FROM sf_transactions t LEFT JOIN sf_recurring r ON r.id = t.recurring_id WHERE t.id = ?`,
+    tid
+  );
   if (!t) throw notFound('התנועה לא נמצאה');
   const stmts = [env.DB.prepare(`DELETE FROM sf_transactions WHERE id = ?`).bind(tid)];
-  // a deleted recurring entry did not happen: remember that, so it is not recorded again
-  if (t.recurring_id) {
+  // A deleted automatic entry did not happen: remember that, so it is not recorded again by itself.
+  // A confirmed one (e.g. a salary) just goes back to "waiting for confirmation".
+  if (t.recurring_id && t.auto) {
     stmts.push(env.DB.prepare(`INSERT OR IGNORE INTO sf_recurring_skips (recurring_id, occurrence) VALUES (?, ?)`).bind(t.recurring_id, t.occurrence));
   }
   await env.DB.batch(stmts);
@@ -116,6 +121,24 @@ export async function confirm({ env, request, params, actor }) {
     { userId: actor.id, source: 'web' }
   );
   return json(await first(env, `${SELECT_TX} WHERE t.id = ?`, newId), 201);
+}
+
+/** DELETE /recurring/:id/skip/:occurrence: undo "did not happen this time" (it waits again / is recorded again). */
+export async function unskip({ env, params }) {
+  const rid = id(params.id);
+  if (!isDate(params.occurrence)) throw badRequest('תאריך לא תקין');
+  await run(env, `DELETE FROM sf_recurring_skips WHERE recurring_id = ? AND occurrence = ?`, rid, params.occurrence);
+  return noContent();
+}
+
+/** GET /recurring/skips: occurrences marked "did not happen" in the last months (to undo by mistake). */
+export async function listSkips({ env }) {
+  return json(await all(
+    env,
+    `SELECT s.recurring_id, s.occurrence, r.name, r.kind, r.amount FROM sf_recurring_skips s JOIN sf_recurring r ON r.id = s.recurring_id
+     WHERE s.occurrence >= ? ORDER BY s.occurrence DESC`,
+    addDays(todayFor(env), -120)
+  ));
 }
 
 /** POST /recurring/:id/skip { occurrence }: this time it did not happen. */

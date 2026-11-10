@@ -245,7 +245,9 @@ test('report: from the first entry, by category and payment, with unrecorded dif
   await app.call('POST', '/transactions', { kind: 'income', amount: 500, date: today, account_id: acc.id });
   await app.call('POST', '/transactions', { kind: 'expense', amount: 999, date: '2020-01-05', account_id: acc.id }); // recorded now, dated long ago
   // the wallet's opening date is today too, so tracking starts today
-  await app.call('POST', `/accounts/${acc.id}/balance`, { balance: 351 }); // 1000 + 500 - 999 = 501 computed (card not charged yet) -> 150 unrecorded
+  // whatever the computed balance is today (the card purchase may already be charged), there is 150 less in the bank
+  const computed = (await app.call('GET', '/dashboard')).data.accounts.find((x) => x.id === acc.id).balance;
+  await app.call('POST', `/accounts/${acc.id}/balance`, { balance: (computed - 15000) / 100 });
   const r = (await app.call('GET', '/report')).data;
   assert.equal(r.tracking_start, '2020-01-05'); // the earliest entry
   assert.equal(r.from, '2020-01-05');
@@ -368,4 +370,30 @@ test('tasks: charges this week, "no overdraft only if the salary comes in", retu
   assert.equal(owed.action.type, 'transfer');
   assert.equal(owed.action.to, other.id);
   assert.equal(owed.amount, 100000);
+});
+
+test('deleting a confirmed salary sends it back to "waiting"; "did not happen" can be undone', async () => {
+  const { app, acc } = await ready();
+  const today = todayFor(app.env);
+  const r = (await app.call('POST', '/recurring', { kind: 'income', name: 'משכורת', amount: 6000, account_id: acc.id, day_of_month: Number(today.slice(8, 10)), start_date: today, auto: false })).data;
+  const c = await app.call('POST', `/recurring/${r.id}/confirm`, { occurrence: today, amount: 5800 });
+  assert.equal((await app.call('DELETE', `/transactions/${c.data.id}`)).status, 204);
+  assert.ok((await app.call('GET', '/dashboard')).data.pending.some((p) => p.recurring_id === r.id), 'waiting again');
+  await app.call('POST', `/recurring/${r.id}/skip`, { occurrence: today });
+  assert.ok(!(await app.call('GET', '/dashboard')).data.pending.some((p) => p.recurring_id === r.id));
+  assert.equal((await app.call('GET', '/recurring/skips')).data[0].name, 'משכורת');
+  await app.call('DELETE', `/recurring/${r.id}/skip/${today}`);
+  assert.ok((await app.call('GET', '/dashboard')).data.pending.some((p) => p.recurring_id === r.id), 'waiting after undo');
+});
+
+test('every income/expense updates its account balance, whatever its date or when it was recorded', async () => {
+  const { app, acc, direct } = await ready();
+  const today = todayFor(app.env);
+  await app.call('PATCH', `/accounts/${acc.id}`, { opening_date: today, opening_balance: 3892.38 });
+  await app.call('POST', '/transactions', { kind: 'expense', amount: 400, date: addDays(today, -3), card_id: direct.id });
+  await app.call('PATCH', `/accounts/${acc.id}`, { name: 'דיסקונט' });
+  await app.call('POST', '/transactions', { kind: 'expense', amount: 116, date: addDays(today, -1), card_id: direct.id });
+  await app.call('POST', '/transactions', { kind: 'income', amount: 350, date: today, account_id: acc.id });
+  const a = (await app.call('GET', '/dashboard')).data.accounts.find((x) => x.id === acc.id);
+  assert.equal(a.balance, 389238 - 40000 - 11600 + 35000);
 });

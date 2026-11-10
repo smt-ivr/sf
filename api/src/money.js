@@ -122,12 +122,10 @@ export async function pendingRecurring(env, today = todayFor(env)) {
 
 // ------------------------------------------------------------------ balances
 /**
- * Balance of every account on `asOf`: the balance entered + everything charged since.
- * An entry counts when it was recorded after the balance was entered (whatever its date: a purchase
- * from three days ago that is recorded now still lowers the balance), or when it hits the account after
- * the opening date (e.g. a regular-card bill for a purchase recorded earlier).
- * Transfers, corrections and held money dated before the opening date are already inside the
- * balance entered (e.g. someone's money that came in last month), so they never count.
+ * Balance of every account on `asOf`: the opening balance (the starting point, before every entry that
+ * was recorded) + every income/expense charged to it until `asOf`, whatever its date or when it was
+ * recorded. "I have X now" corrections fix any difference from the bank. Transfers / held money dated
+ * before the opening date are already inside the opening balance (e.g. someone's money from last month).
  */
 export async function balances(env, asOf) {
   return all(
@@ -135,11 +133,9 @@ export async function balances(env, asOf) {
     `SELECT a.id, a.name, a.bank, a.kind, a.owner_id, a.is_active, a.opening_balance, a.opening_date,
        a.opening_balance
        + COALESCE((SELECT SUM(CASE WHEN t.kind = 'income' THEN t.amount ELSE -t.amount END) FROM sf_transactions t
-           WHERE t.account_id = a.id AND t.charge_date <= ?1
-             AND (t.charge_date > a.opening_date OR t.created_at >= COALESCE(a.opening_at, a.opening_date || 'T00:00:00Z'))), 0)
+           WHERE t.account_id = a.id AND t.charge_date <= ?1), 0)
        + COALESCE((SELECT SUM(m.amount) FROM sf_account_moves m
-           WHERE m.account_id = a.id AND m.date <= ?1
-             AND (m.date > a.opening_date OR (m.date = a.opening_date AND m.created_at >= COALESCE(a.opening_at, a.opening_date || 'T00:00:00Z')))), 0) AS balance
+           WHERE m.account_id = a.id AND m.date <= ?1 AND (m.date >= a.opening_date OR m.kind = 'adjust')), 0) AS balance
      FROM sf_accounts a ORDER BY a.is_active DESC, a.kind, a.sort, a.id`,
     asOf
   );
