@@ -45,6 +45,7 @@ export function Home({ version, lookups, openEntry, refresh }) {
     ${pa.others !== 0 && html`<div class="small muted">${withOthers ? `כולל ${money(pa.others)} של אחרים · שלך ${money(pa.mine)}` : `בבנק ${money(pa.balance)}, מתוכם ${money(pa.others)} של אחרים`}</div>`}
     ${pa.mine < 0 && pa.others !== 0 && html`<div class="small expense">חסר ${money(-pa.mine)} להחזיר לכאן</div>`}
     ${(pa.out || pa.in) ? html`<div class="small muted">30 יום: ${pa.out ? `יוצא ${money(pa.out)}` : ''}${pa.out && pa.in ? ' · ' : ''}${pa.in ? `נכנס ${money(pa.in)}` : ''}</div>` : ''}
+    ${pa.events.filter((e) => e.type === 'move').map((e) => html`<div class="small pending-move">⏳ ${e.amount > 0 ? 'ייכנס' : 'ייצא'} ${money(Math.abs(e.amount))} ב-${shortDate(e.date)} · ${e.name}</div>`)}
     ${pa.need > 0 && html`<div class="small expense"><b>⚠ להכניס ${money(pa.need)} עד ${shortDate(pa.short_by.date)}</b> · ${pa.short_by.name}</div>`}
   </button>`;
 

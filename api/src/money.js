@@ -122,10 +122,11 @@ export async function pendingRecurring(env, today = todayFor(env)) {
 
 // ------------------------------------------------------------------ balances
 /**
- * Balance of every account on `asOf`: the opening balance (the starting point, before every entry that
- * was recorded) + every income/expense charged to it until `asOf`, whatever its date or when it was
- * recorded. "I have X now" corrections fix any difference from the bank. Transfers / held money dated
- * before the opening date are already inside the opening balance (e.g. someone's money from last month).
+ * Balance of every account on `asOf`: the balance in the bank on the opening date (before that day's
+ * charges) + every income/expense/transfer that hits the account from that date until `asOf`.
+ * Anything dated earlier is already inside the opening balance. A transfer dated tomorrow (when it will
+ * show in the bank) counts from tomorrow; until then it is in the forecast. "I have X now" corrections
+ * fix any difference from the bank.
  */
 export async function balances(env, asOf) {
   return all(
@@ -133,9 +134,9 @@ export async function balances(env, asOf) {
     `SELECT a.id, a.name, a.bank, a.kind, a.owner_id, a.is_active, a.opening_balance, a.opening_date,
        a.opening_balance
        + COALESCE((SELECT SUM(CASE WHEN t.kind = 'income' THEN t.amount ELSE -t.amount END) FROM sf_transactions t
-           WHERE t.account_id = a.id AND t.charge_date <= ?1), 0)
+           WHERE t.account_id = a.id AND t.charge_date >= a.opening_date AND t.charge_date <= ?1), 0)
        + COALESCE((SELECT SUM(m.amount) FROM sf_account_moves m
-           WHERE m.account_id = a.id AND m.date <= ?1 AND (m.date >= a.opening_date OR m.kind = 'adjust')), 0) AS balance
+           WHERE m.account_id = a.id AND m.date >= a.opening_date AND m.date <= ?1), 0) AS balance
      FROM sf_accounts a ORDER BY a.is_active DESC, a.kind, a.sort, a.id`,
     asOf
   );

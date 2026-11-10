@@ -259,20 +259,35 @@ test('report: from the first entry, by category and payment, with unrecorded dif
   assert.equal(r.unrecorded, -15000);
 });
 
-test('an expense dated before the balance was entered, but recorded after it, lowers the balance', async () => {
+test('the opening balance is the bank balance on its date: earlier entries are inside it, later ones count', async () => {
   const { app, acc, direct } = await ready();
   const today = todayFor(app.env);
-  await app.call('PATCH', `/accounts/${acc.id}`, { opening_date: today, opening_balance: 3892.38 });
-  await app.call('POST', '/transactions', { kind: 'expense', amount: 400, date: '2020-01-06', card_id: direct.id });
-  const a = (await app.call('GET', '/dashboard')).data.accounts.find((x) => x.id === acc.id);
-  assert.equal(a.balance, 349238);
-  // someone's money that came in last month is already inside the balance entered
-  await app.call('POST', '/held', { name: 'נחמן', amount: 4000, in_balance: false, account_id: acc.id, date: '2020-01-04' });
+  const d5 = addDays(today, -5);
+  // Discount had 4047.38 on the 5th, 4000 of it Nachman's
+  await app.call('PATCH', `/accounts/${acc.id}`, { opening_date: d5, opening_balance: 4047.38 });
+  await app.call('POST', '/held', { name: 'נחמן', amount: 4000, in_balance: false, account_id: acc.id, date: addDays(today, -30) });
+  await app.call('POST', '/transactions', { kind: 'expense', amount: 999, date: addDays(today, -6), card_id: direct.id }); // before: already inside
+  await app.call('POST', '/transactions', { kind: 'expense', amount: 400, date: addDays(today, -4), card_id: direct.id });
+  await app.call('POST', '/transactions', { kind: 'expense', amount: 116, date: addDays(today, -2), card_id: direct.id });
   const d = (await app.call('GET', '/dashboard')).data;
-  assert.equal(d.accounts.find((x) => x.id === acc.id).balance, 349238);
-  assert.equal(d.forecast.per_account.find((x) => x.account_id === acc.id).mine, 349238 - 400000);
-  // and it is part of "since we started recording"
-  assert.equal((await app.call('GET', '/report')).data.expense >= 40000, true);
+  const pa = d.forecast.per_account.find((x) => x.account_id === acc.id);
+  assert.equal(pa.balance, 404738 - 40000 - 11600);
+  assert.equal(pa.mine, 404738 - 40000 - 11600 - 400000);
+});
+
+test('a transfer dated tomorrow (when the bank shows it) counts from tomorrow; until then it is in the forecast', async () => {
+  const { app, acc } = await ready();
+  const today = todayFor(app.env);
+  const other = (await app.call('POST', '/accounts', { name: 'פועלים', opening_balance: 500, opening_date: today })).data;
+  await app.call('PATCH', `/accounts/${acc.id}`, { opening_date: today, opening_balance: 100 });
+  const tomorrow = addDays(today, 1);
+  assert.equal((await app.call('POST', '/transfers', { from_account_id: other.id, to_account_id: acc.id, amount: 300, date: tomorrow })).status, 201);
+  const d = (await app.call('GET', '/dashboard')).data;
+  assert.equal(d.accounts.find((x) => x.id === acc.id).balance, 10000);
+  assert.equal(d.accounts.find((x) => x.id === other.id).balance, 50000);
+  const ev = d.forecast.events.filter((e) => e.type === 'move' && e.date === tomorrow);
+  assert.equal(ev.length, 2);
+  assert.equal(d.forecast.per_account.find((x) => x.account_id === acc.id).end_balance >= 40000, true);
 });
 
 test('per account forecast: what goes out and how much must be added by when', async () => {
@@ -386,14 +401,3 @@ test('deleting a confirmed salary sends it back to "waiting"; "did not happen" c
   assert.ok((await app.call('GET', '/dashboard')).data.pending.some((p) => p.recurring_id === r.id), 'waiting after undo');
 });
 
-test('every income/expense updates its account balance, whatever its date or when it was recorded', async () => {
-  const { app, acc, direct } = await ready();
-  const today = todayFor(app.env);
-  await app.call('PATCH', `/accounts/${acc.id}`, { opening_date: today, opening_balance: 3892.38 });
-  await app.call('POST', '/transactions', { kind: 'expense', amount: 400, date: addDays(today, -3), card_id: direct.id });
-  await app.call('PATCH', `/accounts/${acc.id}`, { name: 'דיסקונט' });
-  await app.call('POST', '/transactions', { kind: 'expense', amount: 116, date: addDays(today, -1), card_id: direct.id });
-  await app.call('POST', '/transactions', { kind: 'income', amount: 350, date: today, account_id: acc.id });
-  const a = (await app.call('GET', '/dashboard')).data.accounts.find((x) => x.id === acc.id);
-  assert.equal(a.balance, 389238 - 40000 - 11600 + 35000);
-});

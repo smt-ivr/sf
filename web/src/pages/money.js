@@ -60,7 +60,7 @@ export function AccountModal({ account, lookups, onClose, onDone, tab: tab0 = 'b
           <${Field} label="סכום (₪)" error=${tr.errors.amount}><input inputmode="decimal" value=${tr.values.amount} onInput=${tr.set('amount')} required /><//>
         </div>
         <div class="row2">
-          <${Field} label="תאריך"><input type="date" value=${tr.values.date} onInput=${tr.set('date')} /><//>
+          <${Field} label="מתי זה יופיע בבנק" hint=${tr.values.date > lookups.today ? 'עד אז ההעברה תופיע כממתינה, ובתאריך הזה תיכנס ליתרה' : ''}><input type="date" value=${tr.values.date} onInput=${tr.set('date')} /><//>
           <${Field} label="הערה"><input value=${tr.values.note} onInput=${tr.set('note')} placeholder="משיכת מזומן" /><//>
         </div>
         <button class="btn primary" disabled=${tr.busy}>שמירה</button>`}
