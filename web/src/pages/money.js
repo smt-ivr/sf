@@ -214,3 +214,28 @@ export function OccurrenceModal({ item, onClose, onDone }) {
     </form>
   <//>`;
 }
+
+/** "They gave back": money given back for an expense paid for someone (partial is fine). */
+export function ReimburseModal({ expense, lookups, onClose, onDone }) {
+  const left = expense.amount - (expense.repaid || 0);
+  const wallet = lookups.accounts.find((a) => a.kind === 'cash' && a.is_active);
+  const f = useForm({ amount: toInput(left), account_id: wallet?.id ?? lookups.accounts.find((a) => a.is_active)?.id ?? '', date: lookups.today });
+  const save = (e) => {
+    e.preventDefault();
+    f.submit(() => api.post(`/transactions/${expense.id}/reimbursements`, { amount: f.values.amount, account_id: Number(f.values.account_id) || null, date: f.values.date }))
+      .then((r) => r && (toast('נרשם החזר'), onDone()));
+  };
+  return html`<${Modal} title=${expense.for_name ? `${expense.for_name} החזיר` : 'קיבלתי החזר'} onClose=${onClose}>
+    <form onSubmit=${save}>
+      <p class="muted">${expense.note || expense.category_name || 'הוצאה'} מ-${shortDate(expense.date)}: ${money(expense.amount)}${expense.repaid ? `, הוחזר כבר ${money(expense.repaid)}` : ''}. נשאר <b>${money(left)}</b>.</p>
+      <div class="amount-input income"><span>₪</span><input inputmode="decimal" value=${f.values.amount} onInput=${f.set('amount')} autofocus /></div>
+      ${f.errors.amount && html`<div class="err">${f.errors.amount}</div>`}
+      <div class="row2">
+        <${Field} label="לאן נכנס"><select value=${f.values.account_id} onChange=${f.set('account_id')}>${lookups.accounts.filter((a) => a.is_active).map((a) => html`<option value=${a.id}>${accIcon(a)} ${a.name}</option>`)}</select><//>
+        <${Field} label="מתי"><input type="date" value=${f.values.date} onInput=${f.set('date')} /><//>
+      </div>
+      <p class="hint">אפשר גם החזר חלקי. זה לא נספר כהכנסה: ההוצאה פשוט קטנה.</p>
+      <button class="btn primary" disabled=${f.busy}>שמירה</button>
+    </form>
+  <//>`;
+}

@@ -56,7 +56,7 @@ export function Transactions({ version, lookups, openEntry, refresh }) {
       <h4>${longDate(g.date)}</h4>
       ${g.items.map((t) => html`<button class="list-row tx" onClick=${() => openEntry(t)}>
         <span><b>${t.note || catName(t.category_id) || (t.kind === 'income' ? 'הכנסה' : 'הוצאה')}</b>
-          <span class="muted small">${[t.note && catName(t.category_id), paymentName(t, lookups), userName(t.owner_id, lookups), t.charge_date !== t.date && `חיוב ${t.charge_date.slice(8)}/${t.charge_date.slice(5, 7)}`, t.source === 'phone' && '☎', t.source === 'recurring' && '↻'].filter(Boolean).join(' · ')}</span></span>
+          <span class="muted small">${[t.note && catName(t.category_id), paymentName(t, lookups), userName(t.owner_id, lookups), t.charge_date !== t.date && `חיוב ${t.charge_date.slice(8)}/${t.charge_date.slice(5, 7)}`, t.source === 'phone' && '☎', t.source === 'recurring' && '↻', t.for_name && `בשביל ${t.for_name}${t.repaid ? ` (הוחזר ${money(t.repaid)})` : ''}`, t.reimburse_of && '↩ החזר, לא הכנסה'].filter(Boolean).join(' · ')}</span></span>
         <b class=${t.kind}>${t.kind === 'expense' ? '−' : '+'}${money(t.amount)}</b>
       </button>`)}
       ${g.moves.map((m) => html`<button class="list-row tx move" onClick=${() => removeMove(m)} title="לחיצה למחיקה">

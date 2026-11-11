@@ -46,10 +46,10 @@ export async function prepareTransaction(env, d, { userId = null, source = 'web'
   await checkCategory(env, d.category_id, d.kind);
   const charge = d.charge_date || chargeDate(d.date, pay.card);
   return env.DB.prepare(
-    `INSERT INTO sf_transactions (kind, amount, date, charge_date, category_id, account_id, card_id, owner_id, user_id, recurring_id, occurrence, note, source)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO sf_transactions (kind, amount, date, charge_date, category_id, account_id, card_id, owner_id, user_id, recurring_id, occurrence, note, source, for_name, reimburse_of)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(d.kind, d.amount, d.date, charge, d.category_id ?? null, pay.account_id, pay.card_id, d.owner_id ?? null, userId,
-    d.recurring_id ?? null, d.occurrence ?? null, d.note ?? '', source);
+    d.recurring_id ?? null, d.occurrence ?? null, d.note ?? '', source, d.kind === 'expense' ? d.for_name || null : null, d.reimburse_of ?? null);
 }
 
 export async function insertTransaction(env, d, opts) {
@@ -274,10 +274,17 @@ export async function forecast(env, to, today = todayFor(env)) {
 // ------------------------------------------------------------------ monthly summary
 /** Income/expenses dated from..to (by the date of each entry). */
 export async function summary(env, from, to) {
+  // money given back for an expense paid for someone is not income: it lowers that expense
+  // (same category, owner and payment method as the expense)
   const rows = await all(
     env,
-    `SELECT t.kind, t.amount, t.date, t.category_id, t.owner_id, t.card_id, t.account_id, c.name AS category_name
-     FROM sf_transactions t LEFT JOIN sf_categories c ON c.id = t.category_id WHERE t.date BETWEEN ? AND ?`,
+    `SELECT CASE WHEN o.id IS NOT NULL THEN 'expense' ELSE t.kind END AS kind,
+            CASE WHEN o.id IS NOT NULL THEN -t.amount ELSE t.amount END AS amount,
+            t.date, COALESCE(o.category_id, t.category_id) AS category_id, COALESCE(o.owner_id, t.owner_id) AS owner_id,
+            CASE WHEN o.id IS NOT NULL THEN o.card_id ELSE t.card_id END AS card_id,
+            CASE WHEN o.id IS NOT NULL THEN o.account_id ELSE t.account_id END AS account_id, c.name AS category_name
+     FROM sf_transactions t LEFT JOIN sf_transactions o ON o.id = t.reimburse_of AND o.kind = 'expense'
+     LEFT JOIN sf_categories c ON c.id = COALESCE(o.category_id, t.category_id) WHERE t.date BETWEEN ? AND ?`,
     from, to
   );
   const total = { income: 0, expense: 0 };
@@ -336,4 +343,17 @@ export async function report(env, from, to) {
   const unrecorded = adjust.reduce((s, a) => s + a.amount, 0);
   const days = Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1);
   return { ...sum, unrecorded, adjustments: adjust, days, per_day: Math.round(sum.expense / days) };
+}
+
+/** Expenses paid for someone that were not fully given back yet ("they owe you"). */
+export async function owedToMe(env) {
+  return all(
+    env,
+    `SELECT t.id, t.for_name, t.amount, t.date, t.note, c.name AS category_name,
+       COALESCE((SELECT SUM(r.amount) FROM sf_transactions r WHERE r.reimburse_of = t.id), 0) AS repaid
+     FROM sf_transactions t LEFT JOIN sf_categories c ON c.id = t.category_id
+     WHERE t.kind = 'expense' AND t.for_name IS NOT NULL AND t.for_name != ''
+       AND t.amount > COALESCE((SELECT SUM(r.amount) FROM sf_transactions r WHERE r.reimburse_of = t.id), 0)
+     ORDER BY t.date, t.id`
+  );
 }

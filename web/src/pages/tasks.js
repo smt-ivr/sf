@@ -3,11 +3,11 @@
 import { useState } from 'preact/hooks';
 import { api } from '../api.js';
 import { confirmBox, ErrorBox, Field, html, Loading, Modal, money, shortDate, toast, toInput, useApi, useForm } from '../ui.js';
-import { AccountModal, ConfirmModal, HeldModal } from './money.js';
+import { AccountModal, ConfirmModal, HeldModal, ReimburseModal } from './money.js';
 
 const LEVEL = { urgent: 'דחוף', soon: 'בקרוב', info: 'לידיעה' };
-const ICON = { confirm: '✍', shortfall: '🏦', depends: '⏳', charge: '📅', owed: '🤝', cash: '💵', expected: '📥', manual: '📝' };
-const BUTTON = { confirm: 'לעדכן', shortfall: 'העברתי', depends: 'העברתי', owed: 'העברתי', cash: 'לספור', expected: 'נכנס', manual: 'בוצע' };
+const ICON = { confirm: '✍', shortfall: '🏦', depends: '⏳', charge: '📅', owed: '🤝', owed_me: '💸', cash: '💵', expected: '📥', manual: '📝' };
+const BUTTON = { confirm: 'לעדכן', shortfall: 'העברתי', depends: 'העברתי', owed: 'העברתי', owed_me: 'קיבלתי', cash: 'לספור', expected: 'נכנס', manual: 'בוצע' };
 
 /** Overdraft outlook for the banks: none / only if income comes in / expected. */
 function MinusLine({ minus }) {
@@ -70,6 +70,7 @@ export function useTaskActions(lookups, accounts, done) {
     if (a.type === 'confirm') modal = html`<${ConfirmModal} item=${a.item} lookups=${lookups} onClose=${close} onDone=${finished} />`;
     if (a.type === 'transfer' && acc(a.to)) modal = html`<${AccountModal} account=${acc(a.to)} lookups=${lookups} tab="transfer" transfer=${{ from: a.from, amount: a.amount }} onClose=${close} onDone=${finished} />`;
     if (a.type === 'count' && acc(a.account_id)) modal = html`<${AccountModal} account=${acc(a.account_id)} lookups=${lookups} onClose=${close} onDone=${finished} />`;
+    if (a.type === 'reimburse') modal = html`<${ReimburseModal} expense=${a.expense} lookups=${lookups} onClose=${close} onDone=${finished} />`;
     if (a.type === 'held') modal = html`<${HeldModal} lookups=${lookups} onClose=${close} onDone=${done} />`;
   }
   return { run, modal };

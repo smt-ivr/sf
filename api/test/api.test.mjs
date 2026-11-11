@@ -483,3 +483,40 @@ test('amounts with more than 2 decimals are rounded to agorot like the bank (6.0
   assert.equal(r.status, 201);
   assert.equal(r.data.amount, 606);
 });
+
+test('paying for a friend: partial cash repayments, "they owe you", reports count it as less expense', async () => {
+  const { app, acc, direct, food } = await ready();
+  const today = todayFor(app.env);
+  await app.call('PATCH', `/accounts/${acc.id}`, { opening_date: today, opening_balance: 1000 });
+  const wallet = (await app.call('GET', '/lookups')).data.accounts.find((a) => a.kind === 'cash');
+  const e = (await app.call('POST', '/transactions', { kind: 'expense', amount: 200, date: today, card_id: direct.id, category_id: food.id, note: 'מסעדה', for_name: 'יוסי' })).data;
+  assert.equal(e.for_name, 'יוסי');
+  let d = (await app.call('GET', '/dashboard')).data;
+  assert.equal(d.owed.length, 1);
+  assert.ok(d.tasks.tasks.some((t) => t.kind === 'owed_me' && t.amount === 20000));
+
+  // he gives back 120 in cash
+  const r1 = await app.call('POST', `/transactions/${e.id}/reimbursements`, { amount: 120 });
+  assert.equal(r1.status, 201);
+  assert.equal(r1.data.account_id, wallet.id);
+  assert.equal(r1.data.reimburse_of, e.id);
+  assert.equal((await app.call('POST', `/transactions/${e.id}/reimbursements`, { amount: 100 })).status, 400); // only 80 left
+  d = (await app.call('GET', '/dashboard')).data;
+  assert.equal(d.owed[0].repaid, 12000);
+  assert.equal(d.accounts.find((a) => a.id === wallet.id).balance, 12000);
+  assert.equal(d.accounts.find((a) => a.id === acc.id).balance, 80000);
+  // reports: 200 - 120 = 80 expense on food, no income
+  const s = (await app.call('GET', `/summary?month=${today.slice(0, 7)}`)).data;
+  assert.equal(s.income, 0);
+  assert.equal(s.expense, 8000);
+  assert.equal(s.categories.find((c) => c.category_id === food.id).amount, 8000);
+
+  // the rest, then nothing is owed
+  await app.call('POST', `/transactions/${e.id}/reimbursements`, { amount: 80, account_id: acc.id });
+  d = (await app.call('GET', '/dashboard')).data;
+  assert.equal(d.owed.length, 0);
+  assert.equal((await app.call('GET', `/transactions/${e.id}/reimbursements`)).data.length, 2);
+  // any expense can get a repayment, even without a name
+  const e2 = (await app.call('POST', '/transactions', { kind: 'expense', amount: 50, date: today, account_id: acc.id })).data;
+  assert.equal((await app.call('POST', `/transactions/${e2.id}/reimbursements`, { amount: 20 })).status, 201);
+});

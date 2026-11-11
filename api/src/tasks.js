@@ -2,7 +2,7 @@
 // Each task: { key, kind, level: 'urgent' | 'soon' | 'info', title, detail, due, amount, action }
 import { all } from './db.js';
 import { addDays } from './dates.js';
-import { forecast, heldFunds, pendingRecurring, todayFor } from './money.js';
+import { forecast, heldFunds, owedToMe, pendingRecurring, todayFor } from './money.js';
 
 const CASH_STALE_DAYS = 7;
 const CHARGE_WEEK = 7;          // charges coming this week get a "make sure there is money" task
@@ -129,6 +129,16 @@ export async function computeTasks(env, { today = todayFor(env), fc = null, held
       key: `expect:${e.recurring_id}:${e.occurrence}`, kind: 'expected', level: 'info',
       title: `צפוי להיכנס: ${e.name}`, detail: `ב-${dm(e.date)}, ${nis(e.amount)} · כשנכנס, לעדכן כמה בפועל`,
       due: e.date, amount: e.amount, action: { type: 'confirm', item: { recurring_id: e.recurring_id, occurrence: e.occurrence, name: e.name, amount: e.amount, kind: 'income' } },
+    });
+  }
+
+  // 5b. people who owe you for something you paid for them
+  for (const o of await owedToMe(env)) {
+    const left = o.amount - o.repaid;
+    tasks.push({
+      key: `owedme:${o.id}`, kind: 'owed_me', level: 'info', title: `${o.for_name} חייב לך ${nis(left)}`,
+      detail: `${o.note || o.category_name || 'הוצאה'} מ-${dm(o.date)}${o.repaid ? ` · החזיר כבר ${nis(o.repaid)}` : ''}`,
+      due: null, amount: left, action: { type: 'reimburse', expense: o },
     });
   }
 
