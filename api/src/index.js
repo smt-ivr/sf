@@ -38,7 +38,6 @@ export const router = new Router()
   .delete('/transactions/:id', tx.remove)
   .get('/transactions/:id/reimbursements', tx.reimbursements)
   .post('/transactions/:id/reimbursements', tx.addReimbursement)
-  .get('/owed', tx.owed)
   // recurring income/expenses
   .get('/recurring/skips', tx.listSkips)
   .get('/recurring', setup.listRecurring)

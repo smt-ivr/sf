@@ -345,15 +345,3 @@ export async function report(env, from, to) {
   return { ...sum, unrecorded, adjustments: adjust, days, per_day: Math.round(sum.expense / days) };
 }
 
-/** Expenses paid for someone that were not fully given back yet ("they owe you"). */
-export async function owedToMe(env) {
-  return all(
-    env,
-    `SELECT t.id, t.for_name, t.amount, t.date, t.note, c.name AS category_name,
-       COALESCE((SELECT SUM(r.amount) FROM sf_transactions r WHERE r.reimburse_of = t.id), 0) AS repaid
-     FROM sf_transactions t LEFT JOIN sf_categories c ON c.id = t.category_id
-     WHERE t.kind = 'expense' AND t.for_name IS NOT NULL AND t.for_name != ''
-       AND t.amount > COALESCE((SELECT SUM(r.amount) FROM sf_transactions r WHERE r.reimburse_of = t.id), 0)
-     ORDER BY t.date, t.id`
-  );
-}

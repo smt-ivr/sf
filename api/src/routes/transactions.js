@@ -1,9 +1,9 @@
 // Income/expense entries, confirming recurring items, and the dashboard/forecast/summary reports.
 import { all, first, nowIso, run, setClause } from '../db.js';
-import { badRequest, json, noContent, notFound, readJson } from '../http.js';
+import { badRequest, invalid, json, noContent, notFound, readJson } from '../http.js';
 import { addDays, chargeDate, monthRange, occurrences, shiftMonth } from '../dates.js';
 import { movesBetween } from './moves.js';
-import { report, trackingStart, owedToMe } from '../money.js';
+import { report, trackingStart } from '../money.js';
 import { computeTasks } from '../tasks.js';
 import { balances, heldFunds, checkCategory, forecast, insertTransaction, pendingRecurring, resolvePayment, summary, syncRecurring, todayFor } from '../money.js';
 import { fields, id, isDate } from '../validate.js';
@@ -20,10 +20,30 @@ const txFields = (body, partial) =>
     .int('owner_id', { nullable: true, min: 1 })
     .str('note', { max: 300 })
     .str('for_name', { max: 80, nullable: true })
+    .money('refund', { nullable: true })                 // "they gave me back" on an expense
+    .int('refund_account_id', { nullable: true, min: 1 }) // where it went (default: the cash wallet)
     .done();
+
+/**
+ * An expense's "they gave me back" amount: kept as one linked income (reimburse_of) so the balance of
+ * the account it went into rises, while reports count it as less expense. 0 / empty removes it.
+ */
+async function setRefund(env, expense, amount, accountId, userId) {
+  if (amount === undefined) return;
+  if (amount && amount > expense.amount) throw invalid({ refund: 'ההחזר גדול מההוצאה' });
+  await run(env, `DELETE FROM sf_transactions WHERE reimburse_of = ?`, expense.id);
+  if (!amount) return;
+  await insertTransaction(
+    env,
+    { kind: 'income', amount, date: expense.date, account_id: accountId ?? null, card_id: null, owner_id: expense.owner_id,
+      note: `החזר: ${expense.note || 'הוצאה'}`, reimburse_of: expense.id },
+    { userId, source: 'web' }
+  );
+}
 
 const SELECT_TX = `SELECT t.*, c.name AS category_name, u.name AS user_name,
     COALESCE((SELECT SUM(r.amount) FROM sf_transactions r WHERE r.reimburse_of = t.id), 0) AS repaid,
+    (SELECT r.account_id FROM sf_transactions r WHERE r.reimburse_of = t.id ORDER BY r.id LIMIT 1) AS repaid_account_id,
     (SELECT COALESCE(o.for_name, o.note) FROM sf_transactions o WHERE o.id = t.reimburse_of) AS reimburse_of_name
   FROM sf_transactions t LEFT JOIN sf_categories c ON c.id = t.category_id LEFT JOIN sf_users u ON u.id = t.user_id`;
 
@@ -60,10 +80,11 @@ export async function list({ env, url }) {
 export async function create({ env, request, actor }) {
   const d = txFields(await readJson(request), false);
   const newId = await insertTransaction(env, d, { userId: actor.id, source: 'web' });
+  if (d.kind === 'expense' && d.refund) await setRefund(env, { ...d, id: newId }, d.refund, d.refund_account_id, actor.id);
   return json(await first(env, `${SELECT_TX} WHERE t.id = ?`, newId), 201);
 }
 
-export async function patch({ env, request, params }) {
+export async function patch({ env, request, params, actor }) {
   const tid = id(params.id);
   const current = await first(env, `SELECT * FROM sf_transactions WHERE id = ?`, tid);
   if (!current) throw notFound('התנועה לא נמצאה');
@@ -83,6 +104,7 @@ export async function patch({ env, request, params }) {
   if (d.for_name !== undefined && m.kind !== 'expense') d.for_name = null;
   const set = setClause(d, ['kind', 'amount', 'date', 'charge_date', 'category_id', 'account_id', 'card_id', 'owner_id', 'note', 'for_name', 'updated_at']);
   await run(env, `UPDATE sf_transactions SET ${set.sql} WHERE id = ?`, ...set.params, tid);
+  if (m.kind === 'expense' && d.refund !== undefined) await setRefund(env, { ...m, id: tid }, d.refund ?? 0, d.refund_account_id, actor.id);
   return json(await first(env, `${SELECT_TX} WHERE t.id = ?`, tid));
 }
 
@@ -216,10 +238,6 @@ export async function addReimbursement({ env, request, params, actor }) {
   return json(await first(env, `${SELECT_TX} WHERE t.id = ?`, newId), 201);
 }
 
-/** GET /owed: expenses paid for others, not fully given back. */
-export async function owed({ env }) {
-  return json(await owedToMe(env));
-}
 
 /** DELETE /recurring/:id/skip/:occurrence: undo "did not happen this time" (it waits again / is recorded again). */
 export async function unskip({ env, params }) {
@@ -276,7 +294,7 @@ export async function dashboard({ env }) {
      WHERE t.source = 'recurring' AND t.date >= ? ORDER BY t.date DESC, t.id DESC LIMIT 12`,
     addDays(today, -14)
   );
-  return json({ today, month: now, previous_month: before, accounts, pending, forecast: fc, recent, auto_recent: autoRecent, owed: await owedToMe(env), held, tasks, since: { ...since, tracking_start: start } });
+  return json({ today, month: now, previous_month: before, accounts, pending, forecast: fc, recent, auto_recent: autoRecent, held, tasks, since: { ...since, tracking_start: start } });
 }
 
 /** GET /forecast?days=60 (or to=YYYY-MM-DD) */

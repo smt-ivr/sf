@@ -2,7 +2,7 @@
 // whether everything is under control, each account's outlook, what comes next, this month.
 import { useState } from 'preact/hooks';
 import { accIcon, ErrorBox, hebDate, html, Loading, money, monthName, paymentName, shortDate, useApi } from '../ui.js';
-import { AccountModal, ConfirmModal, HeldModal, OccurrenceModal, ReimburseModal } from './money.js';
+import { AccountModal, ConfirmModal, HeldModal, OccurrenceModal } from './money.js';
 import { StatusBanner, TaskItem, useTaskActions } from './tasks.js';
 
 const KEY = 'sf.withOthers';
@@ -15,7 +15,6 @@ export function Home({ version, lookups, openEntry, refresh }) {
   const [held, setHeld] = useState(false);
   const [confirming, setConfirming] = useState(null);
   const [changing, setChanging] = useState(null);
-  const [repay, setRepay] = useState(null);
   const { run, modal } = useTaskActions(lookups, data?.accounts || [], refresh);
   const toggle = () => { const v = !withOthers; setWithOthers(v); try { localStorage.setItem(KEY, v ? '1' : '0'); } catch { /* ignore */ } };
 
@@ -85,14 +84,6 @@ export function Home({ version, lookups, openEntry, refresh }) {
       <p class="muted small">לוחצים על ארנק כדי לעדכן כמה מזומן יש בפועל.</p>
     </section>`}
 
-    ${data.owed.length > 0 && html`<section class="card">
-      <div class="month-head"><h3>חייבים לך</h3><b class="income">${money(data.owed.reduce((s, o) => s + o.amount - o.repaid, 0))}</b></div>
-      ${data.owed.map((o) => html`<div class="list-row">
-        <span><b>${o.for_name}</b><span class="muted small">${o.note || o.category_name || 'הוצאה'} · ${shortDate(o.date)}${o.repaid ? ` · החזיר ${money(o.repaid)} מתוך ${money(o.amount)}` : ''}</span></span>
-        <span class="end"><b>${money(o.amount - o.repaid)}</b><button class="link small" onClick=${() => setRepay(o)}>קיבלתי</button></span>
-      </div>`)}
-    </section>`}
-
     ${upcoming.length > 0 && html`<section class="card">
       <div class="month-head"><h3>מה הלאה</h3><a class="link small" href="#/forecast">לצפי המלא ›</a></div>
       ${upcoming.map((e) => html`<div class="list-row">
@@ -144,7 +135,6 @@ export function Home({ version, lookups, openEntry, refresh }) {
 
     ${account && html`<${AccountModal} account=${account} lookups=${lookups} onClose=${() => setAccount(null)} onDone=${() => { setAccount(null); refresh(); }} />`}
     ${held && html`<${HeldModal} lookups=${lookups} onClose=${() => setHeld(false)} onDone=${refresh} />`}
-    ${repay && html`<${ReimburseModal} expense=${repay} lookups=${lookups} onClose=${() => setRepay(null)} onDone=${() => { setRepay(null); refresh(); }} />`}
     ${changing && html`<${OccurrenceModal} item=${changing} onClose=${() => setChanging(null)} onDone=${() => { setChanging(null); refresh(); }} />`}
     ${confirming && html`<${ConfirmModal} item=${confirming} lookups=${lookups} onClose=${() => setConfirming(null)} onDone=${() => { setConfirming(null); refresh(); }} />`}
     ${modal}

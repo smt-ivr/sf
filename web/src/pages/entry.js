@@ -1,7 +1,6 @@
 // Add / edit an income or expense. Built for the phone: amount first, then tap a category and a payment.
 import { useState } from 'preact/hooks';
 import { api } from '../api.js';
-import { ReimburseModal } from './money.js';
 import { confirmBox, Field, html, Modal, num, Segments, shortDate, toast, toInput, useForm, useApi, money, paymentName } from '../ui.js';
 
 /** Same rule as the server: a regular card is charged on its next billing day (on or after the date). */
@@ -25,13 +24,12 @@ export function EntryForm({ tx, lookups, me, onClose, onSaved }) {
     date: tx.date || lookups.today,
     owner_id: editing ? tx.owner_id ?? '' : me.id,
     note: tx.note || '',
-    for_name: tx.for_name || '',
+    refund: tx.repaid ? toInput(tx.repaid) : '',
+    refund_account_id: tx.repaid_account_id ?? lookups.accounts.find((a) => a.kind === 'cash' && a.is_active)?.id ?? '',
     charge_date: '',
   });
   const [more, setMore] = useState(false);
-  const [forOther, setForOther] = useState(Boolean(tx.for_name));
-  const [reimbursing, setReimbursing] = useState(false);
-  const reimb = useApi(editing && tx.kind === 'expense' ? `/transactions/${tx.id}/reimbursements` : null);
+
   const v = f.values;
   const cards = lookups.cards.filter((c) => c.is_active || `c${c.id}` === pay0);
   const accounts = lookups.accounts.filter((a) => a.is_active || `a${a.id}` === pay0);
@@ -43,11 +41,12 @@ export function EntryForm({ tx, lookups, me, onClose, onSaved }) {
     e?.preventDefault();
     if (!v.pay) return toast('בחרו איך שולם', 'bad');
     const body = {
-      kind: v.kind, amount: v.amount, date: v.date, note: v.note, for_name: v.kind === 'expense' && forOther ? v.for_name || null : null,
+      kind: v.kind, amount: v.amount, date: v.date, note: v.note,
       category_id: num(v.category_id), owner_id: num(v.owner_id),
       card_id: v.pay.startsWith('c') ? Number(v.pay.slice(1)) : null,
       account_id: v.pay.startsWith('a') ? Number(v.pay.slice(1)) : null,
     };
+    if (v.kind === 'expense') { body.refund = v.refund || null; body.refund_account_id = num(v.refund_account_id); }
     if (v.charge_date) body.charge_date = v.charge_date;
     f.submit(() => (editing ? api.patch(`/transactions/${tx.id}`, body) : api.post('/transactions', body))).then((r) => {
       if (!r) return;
@@ -93,8 +92,12 @@ export function EntryForm({ tx, lookups, me, onClose, onSaved }) {
       </div>
       ${card && card.kind === 'regular' && html`<div class="hint">יחויב בחשבון ב-${shortDate(charge)}</div>`}
       <${Field} label="הערה"><input value=${v.note} onInput=${f.set('note')} placeholder="למשל: רמי לוי" /><//>
-      ${v.kind === 'expense' && html`<label class="check"><input type="checkbox" checked=${forOther} onChange=${(e) => setForOther(e.target.checked)} /> שילמתי בשביל מישהו אחר (הוא יחזיר לי)</label>
-        ${forOther && html`<${Field} label="בשביל מי" error=${f.errors.for_name}><input value=${v.for_name} onInput=${f.set('for_name')} placeholder="שם" required /><//>`}`}
+      ${v.kind === 'expense' && html`<div class="row2">
+        <${Field} label="החזירו לי (₪)" hint="למשל חבר שהחזיר את החלק שלו. לא נספר כהכנסה" error=${f.errors.refund}><input inputmode="decimal" value=${v.refund} onInput=${f.set('refund')} placeholder="0" /><//>
+        ${v.refund && Number(v.refund) > 0 && html`<${Field} label="לאן נכנס"><select value=${v.refund_account_id} onChange=${f.set('refund_account_id')}>
+          ${lookups.accounts.filter((a) => a.is_active).map((a) => html`<option value=${a.id}>${a.kind === 'cash' ? '💵' : '🏦'} ${a.name}</option>`)}
+        </select><//>`}
+      </div>`}
 
       ${more
         ? html`<${Field} label="תאריך חיוב בחשבון (אם שונה)" hint="ריק = לפי הכרטיס" error=${f.errors.charge_date}><input type="date" value=${v.charge_date} onInput=${f.set('charge_date')} /><//>`
@@ -107,11 +110,5 @@ export function EntryForm({ tx, lookups, me, onClose, onSaved }) {
       ${tx.reimburse_of && html`<p class="hint">↩ זה החזר על הוצאה${tx.reimburse_of_name ? ` (${tx.reimburse_of_name})` : ''}: הוא מעדכן את היתרה, אבל לא נספר כהכנסה בדוחות. ההוצאה פשוט קטנה.</p>`}
       ${editing && tx.source !== 'web' && html`<p class="hint">${tx.source === 'phone' ? 'נרשם מהטלפון' : 'נרשם אוטומטית מתנועה קבועה'}${tx.user_name ? ` · ${tx.user_name}` : ''}</p>`}
     </form>
-    ${editing && tx.kind === 'expense' && html`<div class="card held">
-      <div class="month-head"><b class="small">החזרים${tx.for_name ? ` מ${tx.for_name}` : ''}</b><span class="small muted">${tx.repaid ? `הוחזר ${money(tx.repaid)} מתוך ${money(tx.amount)}` : 'עוד לא הוחזר'}</span></div>
-      ${(reimb.data || []).map((r) => html`<div class="list-row small"><span>${shortDate(r.date)} · ${paymentName(r, lookups)}</span><b class="income">+${money(r.amount)}</b></div>`)}
-      ${tx.amount > (tx.repaid || 0) && html`<button type="button" class="btn small" onClick=${() => setReimbursing(true)}>+ קיבלתי החזר</button>`}
-    </div>`}
-    ${reimbursing && html`<${ReimburseModal} expense=${tx} lookups=${lookups} onClose=${() => setReimbursing(false)} onDone=${() => { setReimbursing(false); onSaved(); }} />`}
   <//>`;
 }
